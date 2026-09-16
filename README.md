@@ -14,17 +14,25 @@
 
 ## 啟動
 
-本機 Docker 是 OrbStack Linux ARM64。這台機器的 Docker credential helper 目前缺失，因此請用專案 wrapper 啟動。它會使用一次性的匿名 Docker 設定與 OrbStack socket，**不會修改** `~/.docker/config.json` 或登入資料：
+使用專案的跨平台 Compose wrapper 啟動。它支援 macOS（含 OrbStack）與 Ubuntu/Linux，會依序使用 `DOCKER_BIN`、PATH 中的 `docker`、`~/.local/bin/docker` 或 OrbStack 的 Docker。系統必須提供 Docker Engine 與 Docker Compose v2（`docker compose`）；Ubuntu 可依 Docker 官方安裝指引安裝 Docker Engine 和 Compose plugin。
+
+預設 `BONSKI_DOCKER_CONFIG_MODE=auto`。若目前 Docker 設定引用了本機缺少的 credential helper，wrapper 會暫時使用空的匿名設定（並保留可用的 Compose plugin），不會修改 `~/.docker/config.json` 或登入資料：
 
 ```sh
-sh scripts/orbstack-compose.sh up -d --build
+sh scripts/compose.sh up -d --build
+```
+
+在 Ubuntu Server 上，請以可存取 Docker daemon 的部署使用者執行相同指令：
+
+```sh
+sh scripts/compose.sh up -d --build
 ```
 
 開啟：
 
 ```text
 http://localhost:8080
-http://<Mac 的區域網路 IP>:8080
+http://<部署主機的區域網路 IP>:8080
 ```
 
 查看健康檢查：
@@ -36,7 +44,7 @@ curl http://localhost:8080/healthz
 停止：
 
 ```sh
-sh scripts/orbstack-compose.sh down
+sh scripts/compose.sh down
 ```
 
 ## 正式提交前
@@ -47,7 +55,7 @@ sh scripts/orbstack-compose.sh down
 4. 只有確認後才將環境變數改成 `DRY_RUN=false`，並重新建立容器：
 
    ```sh
-   DRY_RUN=false sh scripts/orbstack-compose.sh up -d --build
+   DRY_RUN=false sh scripts/compose.sh up -d --build
    ```
 
 正式紀錄只會在使用者從網站明確按下「送出領板申請」後建立。
@@ -66,9 +74,17 @@ python3 -m venv .venv
 容器驗證：
 
 ```sh
-sh scripts/orbstack-compose.sh config
-sh scripts/orbstack-compose.sh up --build -d
+sh scripts/compose.sh config
+sh scripts/compose.sh up --build -d
 curl http://localhost:8080/healthz
 ```
+
+可用環境變數：
+
+- `DOCKER_BIN`：指定 Docker 可執行檔的名稱或路徑。
+- `BONSKI_DOCKER_CONFIG_MODE=auto|default|anonymous`：`auto`（預設）只會在缺少 credential helper 時暫用匿名設定；`default` 保留 Docker 設定；`anonymous` 一律暫用匿名設定。
+- `DOCKER_HOST`：若已設定會完整保留。只有選到 OrbStack Docker 且未設定時，wrapper 才會使用存在的 OrbStack socket。
+
+舊的 `sh scripts/orbstack-compose.sh ...` 仍是相容入口，但新文件與跨平台使用應使用 `sh scripts/compose.sh ...`。Wrapper 不會安裝 Docker 或 Compose，也不會自行啟動容器；傳入的 Compose 指令才決定操作。
 
 `pic/` 只保留本機 UI / dry-run 測試照片。它們含有原始中繼資料，已由 `.dockerignore` 排除，請勿放進公開 image 或版本控制。

@@ -364,15 +364,9 @@ API 不應接受任意欄位、任意 URL 或由客戶端指定的飛書端點�
 
 ### 10.1 運行環境
 
-使用者提供的 Docker 路徑：
+部署主機可使用 macOS 或 Ubuntu/Linux 的 Docker Engine 與 Docker Compose v2（`docker compose`）。本專案以 `sh scripts/compose.sh` 提供可攜入口，依環境選擇 Docker，不要求硬編碼個人本機路徑。
 
-```text
-/Users/league2eb/.local/bin/docker
-```
-
-此路徑已確認連到 OrbStack Docker，Docker server 為 Linux `arm64`，Compose 版本為 `v5.1.2`。
-
-映像必須在 ARM64 環境實際驗證可建置與可執行。
+歷史驗證環境為 OrbStack Docker server（Linux `arm64`，Compose `v5.1.2`）；映像仍必須在該 ARM64 環境實際驗證可建置與可執行。
 
 ### 10.2 預計檔案結構
 
@@ -398,6 +392,9 @@ BonskiBoard/
 ├── .gitignore
 ├── .env.example
 ├── README.md
+├── scripts/
+│   ├── compose.sh
+│   └── orbstack-compose.sh     # 舊版相容入口
 └── PROPOSED_SPECIFICATION.md
 ```
 
@@ -412,16 +409,16 @@ BonskiBoard/
 - 以 `restart: unless-stopped` 維持網站服務。
 - 不掛載保存使用者資料的資料庫 volume。
 
-### 10.4 本機啟動
+### 10.4 啟動服務
 
 ```bash
-/Users/league2eb/.local/bin/docker compose up -d --build
+sh scripts/compose.sh up -d --build
 ```
 
 區域網路手機以：
 
 ```text
-http://<Mac 的區域網路 IP>:8080
+http://<部署主機的區域網路 IP>:8080
 ```
 
 開啟服務。
@@ -509,5 +506,5 @@ pic/card_back.jpeg
 - 後端不永久保存個資、照片、Cookie 或 Token。
 - 後端能使用乾淨匿名瀏覽器執行飛書流程。
 - 表單結構異常時安全失敗，不會盲目送出。
-- Docker Compose 可在提供的 ARM64 OrbStack 環境啟動。
+- Docker Compose 透過跨平台 wrapper 支援 macOS 與 Ubuntu/Linux，並保留提供的 ARM64 OrbStack 環境驗證。
 - dry-run 已驗證，但正式提交只在使用者明確點擊後發生。
