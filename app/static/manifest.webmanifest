@@ -1,0 +1,10 @@
+{
+  "name": "BonskiBoard",
+  "short_name": "BonskiBoard",
+  "description": "手機版雪板領取申請助手",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfdfd",
+  "theme_color": "#5acdbd",
+  "lang": "zh-Hant"
+}

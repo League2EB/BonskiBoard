@@ -1,0 +1,13 @@
+.DS_Store
+.git
+.gitignore
+.venv
+__pycache__
+.pytest_cache
+tests
+test-results
+pic
+curl.txt
+signinday0.txt
+PROPOSED_SPECIFICATION.md
+.env

@@ -1,0 +1,1 @@
+"""BonskiBoard application package."""

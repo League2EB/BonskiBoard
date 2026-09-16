@@ -1,0 +1,66 @@
+# Operating system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor settings
+.idea/
+.vscode/
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+.direnv/
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+
+# Python tooling, tests, and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+pytestdebug.log
+.hypothesis/
+.mypy_cache/
+.nox/
+.pyre/
+.pyright/
+.pytype/
+.ruff_cache/
+.tox/
+
+# Python package build output
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Local runtime output
+*.log
+*.pid
+compose.local.yaml
+compose.local.yml
+docker-compose.override.yaml
+docker-compose.override.yml
+
+# Browser and UI test artifacts
+test-results/
+playwright-report/
+blob-report/
+*.har
+
+# Local-only test photos and browser captures
+pic/
+curl.txt
+signinday0.txt
