@@ -3,6 +3,28 @@
 
 set -eu
 
+network_mode=${BONSKI_NETWORK_MODE:-default}
+case "$network_mode" in
+    default|china) ;;
+    *)
+        printf '%s\n' "Invalid BONSKI_NETWORK_MODE: $network_mode (expected default or china)." >&2
+        exit 1
+        ;;
+esac
+
+if [ "$network_mode" = "china" ]; then
+    if [ -z "${BONSKI_PYTHON_BASE_IMAGE+x}" ]; then
+        BONSKI_PYTHON_BASE_IMAGE="docker.1ms.run/library/python:3.12-slim-bookworm"
+    fi
+    if [ -z "${BONSKI_DEBIAN_MIRROR+x}" ]; then
+        BONSKI_DEBIAN_MIRROR="https://mirrors.ustc.edu.cn/debian"
+    fi
+    if [ -z "${BONSKI_PIP_INDEX_URL+x}" ]; then
+        BONSKI_PIP_INDEX_URL="https://mirrors.aliyun.com/pypi/simple/"
+    fi
+    export BONSKI_PYTHON_BASE_IMAGE BONSKI_DEBIAN_MIRROR BONSKI_PIP_INDEX_URL
+fi
+
 find_docker() {
     candidate=$1
     case "$candidate" in

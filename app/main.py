@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import secrets
 from tempfile import TemporaryDirectory
-from typing import Protocol
+from typing import Optional, Protocol
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -41,10 +41,12 @@ BOARD_NUMBER_PATTERN = re.compile(r"^[A-Za-z0-9._#\-/]+$")
 REQUIRED_FIELDS = {
     "name",
     "board_number",
+    "ski_type",
     "board_photo",
     "card_front_photo",
     "card_back_photo",
 }
+SKI_TYPES = {"single", "double"}
 
 
 class Submitter(Protocol):
@@ -53,13 +55,14 @@ class Submitter(Protocol):
         *,
         name: str,
         board_number: str,
+        ski_type: str,
         photos: dict[str, SanitizedPhoto],
     ) -> SubmissionResult: ...
 
 
 def create_app(
-    settings: Settings | None = None,
-    submitter: Submitter | None = None,
+    settings: Optional[Settings] = None,
+    submitter: Optional[Submitter] = None,
 ) -> FastAPI:
     """Create a testable app instance without storing any user information."""
 
@@ -131,10 +134,10 @@ def create_app(
             raise ApiError(
                 "rate_limited",
                 429,
-                "送出次數過於頻繁，請稍後再試。",
+                "送出次數太頻繁，請稍後再試。",
             )
 
-        name, board_number, uploads = await _parse_submission_form(request)
+        name, board_number, ski_type, uploads = await _parse_submission_form(request)
         request_id = secrets.token_hex(8)
         LOGGER.info("submission request_id=%s phase=accepted", request_id)
 
@@ -160,6 +163,7 @@ def create_app(
                             app.state.submitter.submit(
                                 name=name,
                                 board_number=board_number,
+                                ski_type=ski_type,
                                 photos=photos,
                             ),
                             timeout=app.state.settings.request_timeout_seconds,
@@ -168,7 +172,7 @@ def create_app(
                     raise ApiError(
                         "submit_timeout",
                         504,
-                        "送出流程逾時，請稍後再試。",
+                        "送出逾時，請稍後再試。",
                     ) from exc
         except ApiError as exc:
             LOGGER.warning(
@@ -182,7 +186,7 @@ def create_app(
             raise ApiError(
                 "submit_failed",
                 502,
-                "送出流程發生問題，請稍後再試。",
+                "送出失敗，請稍後再試。",
             )
         finally:
             for upload in uploads.values():
@@ -203,7 +207,7 @@ def create_app(
 
 async def _parse_submission_form(
     request: Request,
-) -> tuple[str, str, dict[str, UploadFile]]:
+) -> tuple[str, str, str, dict[str, UploadFile]]:
     """Accept exactly the expected multipart schema, with no arbitrary fields."""
 
     content_type = request.headers.get("content-type", "")
@@ -211,13 +215,13 @@ async def _parse_submission_form(
         raise ApiError(
             "validation_failed",
             415,
-            "送出格式不正確，請重新從本網站操作。",
+            "送出格式不正確，請從本站重新操作。",
         )
 
     try:
         form = await request.form(
             max_files=3,
-            max_fields=5,
+            max_fields=6,
         )
     except Exception as exc:
         raise ApiError(
@@ -234,19 +238,25 @@ async def _parse_submission_form(
         raise ApiError(
             "validation_failed",
             422,
-            "請完整填寫姓名、雪板編號與三張照片。",
+            "請填寫姓名、寄存編號、雪板類型，並選擇三張照片。",
         )
 
     name_value = values["name"][0]
     board_number_value = values["board_number"][0]
-    if not isinstance(name_value, str) or not isinstance(board_number_value, str):
+    ski_type_value = values["ski_type"][0]
+    if (
+        not isinstance(name_value, str)
+        or not isinstance(board_number_value, str)
+        or not isinstance(ski_type_value, str)
+    ):
         raise ApiError(
             "validation_failed",
             422,
-            "姓名或雪板編號格式不正確。",
+            "姓名、寄存編號或雪板類型格式不正確。",
         )
     name = _validate_name(name_value)
     board_number = _validate_board_number(board_number_value)
+    ski_type = _validate_ski_type(ski_type_value)
 
     uploads: dict[str, UploadFile] = {}
     for role in ("board_photo", "card_front_photo", "card_back_photo"):
@@ -255,11 +265,11 @@ async def _parse_submission_form(
             raise ApiError(
                 "validation_failed",
                 422,
-                "請為每個照片欄位選擇一張圖片。",
+                "請選擇三張照片。",
             )
         uploads[role] = value
 
-    return name, board_number, uploads
+    return name, board_number, ski_type, uploads
 
 
 def _validate_name(value: str) -> str:
@@ -281,9 +291,19 @@ def _validate_board_number(value: str) -> str:
         raise ApiError(
             "validation_failed",
             422,
-            "雪板編號格式不正確。",
+            "寄存編號格式不正確。",
         )
     return board_number
+
+
+def _validate_ski_type(value: str) -> str:
+    if value not in SKI_TYPES:
+        raise ApiError(
+            "validation_failed",
+            422,
+            "雪板類型格式不正確。",
+        )
+    return value
 
 
 app = create_app()

@@ -16,16 +16,24 @@ class FakeSubmitter:
     result: SubmissionResult = field(
         default_factory=lambda: SubmissionResult(
             status="dry_run_complete",
-            message="已完成填寫與附件上傳檢查，未建立正式申請。",
+            message="檢查完成，未正式送出。",
         )
     )
     calls: list[dict] = field(default_factory=list)
 
-    async def submit(self, *, name: str, board_number: str, photos: dict) -> SubmissionResult:
+    async def submit(
+        self,
+        *,
+        name: str,
+        board_number: str,
+        ski_type: str,
+        photos: dict,
+    ) -> SubmissionResult:
         self.calls.append(
             {
                 "name": name,
                 "board_number": board_number,
+                "ski_type": ski_type,
                 "photos": {
                     role: photo.path.read_bytes() for role, photo in photos.items()
                 },

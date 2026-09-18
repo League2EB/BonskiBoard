@@ -19,7 +19,7 @@ function openDatabase() {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("無法開啟本機照片資料庫。"));
+    request.onerror = () => reject(request.error || new Error("無法讀取已儲存的照片。"));
   });
 }
 
@@ -31,8 +31,8 @@ async function withStore(mode, operation) {
       const store = transaction.objectStore(PHOTO_STORE);
       const request = operation(store);
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error || new Error("無法更新本機照片。"));
-      transaction.onerror = () => reject(transaction.error || new Error("無法更新本機照片。"));
+      request.onerror = () => reject(request.error || new Error("無法更新已儲存的照片。"));
+      transaction.onerror = () => reject(transaction.error || new Error("無法更新已儲存的照片。"));
     });
   } finally {
     database.close();
@@ -44,28 +44,39 @@ export function loadProfile() {
     const serialized = localStorage.getItem(PROFILE_KEY);
     if (!serialized) return null;
     const profile = JSON.parse(serialized);
-    if (
-      profile?.schemaVersion !== 1
-      || typeof profile.name !== "string"
-      || typeof profile.boardNumber !== "string"
-    ) {
+    if (typeof profile?.name !== "string" || typeof profile.boardNumber !== "string") {
       localStorage.removeItem(PROFILE_KEY);
       return null;
     }
-    return profile;
+    if (profile.schemaVersion === 1) {
+      return {
+        ...profile,
+        skiType: "",
+        needsSkiTypeSelection: true,
+      };
+    }
+    if (
+      profile.schemaVersion === 2
+      && (profile.skiType === "single" || profile.skiType === "double")
+    ) {
+      return profile;
+    }
+    localStorage.removeItem(PROFILE_KEY);
+    return null;
   } catch {
     localStorage.removeItem(PROFILE_KEY);
     return null;
   }
 }
 
-export function saveProfile({ name, boardNumber }) {
+export function saveProfile({ name, boardNumber, skiType }) {
   localStorage.setItem(
     PROFILE_KEY,
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       name,
       boardNumber,
+      skiType,
       updatedAt: new Date().toISOString(),
     }),
   );

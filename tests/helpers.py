@@ -27,7 +27,11 @@ def valid_submission_files() -> dict[str, tuple[str, bytes, str]]:
 
 
 def valid_submission_data() -> dict[str, str]:
-    return {"name": "測試使用者", "board_number": "B413"}
+    return {
+        "name": "SYNTHETIC-USER",
+        "board_number": "TEST-0001",
+        "ski_type": "single",
+    }
 
 
 def same_origin_headers() -> dict[str, str]:

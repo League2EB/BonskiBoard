@@ -6,13 +6,28 @@
     <meta name="theme-color" content="#5acdbd" />
     <meta
       name="description"
-      content="BonskiBoard 讓你把領板申請資料只儲存在目前裝置，日後一鍵送出。"
+      content="BonskiBoard 廣州融創寄存區領板助手"
     />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="BonskiBoard" />
+    <meta property="og:title" content="BonskiBoard 領板申請" />
+    <meta property="og:description" content="BonskiBoard 廣州融創寄存區領板助手" />
+    <meta property="og:image" content="/static/bonskiboard-share-card-final.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="BonskiBoard 廣州融創寄存區領板助手" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="BonskiBoard 領板申請" />
+    <meta name="twitter:description" content="BonskiBoard 廣州融創寄存區領板助手" />
+    <meta name="twitter:image" content="/static/bonskiboard-share-card-final.png" />
+    <meta name="twitter:image:alt" content="BonskiBoard 廣州融創寄存區領板助手" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%235acdbd'/%3E%3Cpath d='M32 11c10 0 18 9 18 21S42 53 32 53 14 44 14 32 22 11 32 11Z' fill='none' stroke='%23152825' stroke-width='5'/%3E%3Cpath d='M14 32h36' stroke='%23152825' stroke-width='5'/%3E%3Ccircle cx='32' cy='32' r='6' fill='%23fcfdfd' stroke='%23152825' stroke-width='4'/%3E%3C/svg%3E" />
+    <link rel="icon" href="/static/icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/static/icon.png" />
     <link rel="stylesheet" href="/pokemon-theme.css" />
     <link rel="stylesheet" href="/static/styles.css" />
-    <title>BonskiBoard · 領板申請</title>
+    <title>BonskiBoard 領板申請</title>
   </head>
   <body>
     <a class="skip-link" href="#main-content">跳到主要內容</a>
@@ -21,20 +36,23 @@
       <div class="container nav-shell">
         <a class="brand" href="/" aria-label="BonskiBoard 首頁">
           <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 64 64" focusable="false">
-              <path d="M32 11c10 0 18 9 18 21S42 53 32 53 14 44 14 32 22 11 32 11Z"></path>
-              <path d="M14 32h36"></path>
-              <circle cx="32" cy="32" r="6"></circle>
-            </svg>
+            <img src="/static/icon.png" alt="" />
           </span>
           <span class="brand-copy">
             <strong>BonskiBoard</strong>
             <small>BOARD PICKUP</small>
           </span>
         </a>
+        <nav class="section-nav" aria-label="頁面導覽">
+          <a href="#main-content">首頁</a>
+          <a href="#about">用途</a>
+          <a href="#details">資料</a>
+          <a href="#photos">照片</a>
+          <a href="#submit">送出</a>
+        </nav>
         <span class="local-pill">
           <span class="status-dot" aria-hidden="true"></span>
-          僅此裝置
+          只存這個瀏覽器
         </span>
       </div>
     </header>
@@ -47,14 +65,14 @@
         <div class="container hero-layout">
           <div class="hero-copy">
             <p class="eyebrow"><span></span>手機領板助手</p>
-            <h1>設定一次，<strong>領板更快。</strong></h1>
+            <h1>設定一次，<strong>領板更快</strong></h1>
             <p class="hero-description">
-              姓名、雪板編號與照片只會保存在你目前的瀏覽器。下次開啟，確認後即可送出申請。
+              資料只存在目前瀏覽器。下次開啟，確認後直接送出
             </p>
             <ol class="step-strip" aria-label="使用步驟">
-              <li><span>01</span>設定資料</li>
-              <li><span>02</span>儲存此裝置</li>
-              <li><span>03</span>一鍵送出</li>
+              <li><span>01</span>填資料</li>
+              <li><span>02</span>儲存資料</li>
+              <li><span>03</span>送出</li>
             </ol>
           </div>
 
@@ -80,6 +98,82 @@
               不建立帳號
             </div>
           </aside>
+
+          <section class="quick-submit-card" data-quick-submit hidden aria-labelledby="quick-submit-title">
+            <div class="quick-submit-copy">
+              <p class="quick-submit-kicker"><span class="status-dot" aria-hidden="true"></span>資料完整</p>
+              <h1 id="quick-submit-title">確認資料，<strong>直接送出</strong></h1>
+              <p class="quick-submit-description">已載入上次儲存的資料</p>
+              <dl class="quick-submit-summary" aria-label="已儲存的領板資料">
+                <div>
+                  <dt>姓名</dt>
+                  <dd data-quick-name></dd>
+                </div>
+                <div>
+                  <dt>寄存編號</dt>
+                  <dd data-quick-board-number></dd>
+                </div>
+                <div>
+                  <dt>雪板資料</dt>
+                  <dd><span data-quick-ski-type></span> · <span data-quick-photo-count></span></dd>
+                </div>
+              </dl>
+            </div>
+            <div class="quick-submit-action">
+              <p class="quick-submit-status"><span aria-hidden="true">✓</span>資料完整</p>
+              <button id="quick-submit-button" class="button button-primary quick-submit-button" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 10 17l9-10"></path></svg>
+                送出領板申請
+              </button>
+              <a class="quick-submit-edit" href="#profile-form">檢查或修改</a>
+              <p class="quick-submit-disclosure">送出時才會暫時傳送資料</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="about" class="about-section" aria-labelledby="about-title">
+        <div class="container about-layout">
+          <header class="about-heading">
+            <p class="eyebrow eyebrow-secondary"><span></span>先說清楚</p>
+            <h2 id="about-title">少填一次表單<br />多留一點時間滑雪</h2>
+            <p>這不是另一個要你記帳號的網站</p>
+          </header>
+
+          <div class="about-grid">
+            <article class="about-card">
+              <h3>這幹嘛的？</h3>
+              <p>
+                因為長期在廣州融創練習，我通常會在到達雪場前先填好領板表單。每次都得打開熱雪奇蹟的飛書網頁，點選「再次填寫」，重新輸入資料、重新選照片，很麻煩。
+              </p>
+              <p class="about-card-closing">BonskiBoard 只做一件事：設定一次，之後一鍵送出。</p>
+            </article>
+            <article class="about-card about-card-privacy">
+              <h3>資料存在哪？</h3>
+              <p class="about-quote">只存在目前瀏覽器</p>
+              <p>
+                網站不建立帳號，也不在後端長期保存資料。送出時才會暫時傳送，完成後刪除
+              </p>
+            </article>
+          </div>
+
+          <aside class="about-scope" aria-labelledby="about-scope-title">
+            <h3 id="about-scope-title">使用前看一下</h3>
+            <dl class="about-scope-list">
+              <div>
+                <dt>適用地點</dt>
+                <dd>目前只支援廣州融創滑雪場寄存區</dd>
+              </div>
+              <div>
+                <dt>適用對象</dt>
+                <dd>適合已寄存雪板並持有寄存編號的人</dd>
+              </div>
+              <div>
+                <dt>非官方工具</dt>
+                <dd>非官方工具，與廣州融創、熱雪奇蹟及飛書無合作或從屬關係</dd>
+              </div>
+            </dl>
+          </aside>
         </div>
       </section>
 
@@ -87,29 +181,29 @@
         <div class="container workspace">
           <aside class="progress-panel">
             <p class="eyebrow eyebrow-secondary"><span></span>你的設定</p>
-            <h2 id="setup-title">把常用資料<br />留在手機裡。</h2>
+            <h2 id="setup-title">資料只留在<br />目前瀏覽器</h2>
             <p>
-              儲存後，資料不會上傳到 BonskiBoard 伺服器。只有你明確按下送出時，才會短暫用於代填飛書表單。
+              儲存時不會上傳。送出申請時才會暫時傳到伺服器
             </p>
             <div class="privacy-card">
               <span class="privacy-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 3 8.3 7 10 4-1.7 7-5.4 7-10V6l-7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg>
               </span>
               <div>
-                <strong>只存於目前裝置</strong>
-                <p>清除網站資料、使用無痕模式或換手機後，需要重新設定。</p>
+                <strong>換裝置要重設</strong>
+                <p>使用無痕模式或清除網站資料後，也需要重新設定</p>
               </div>
             </div>
           </aside>
 
           <form id="profile-form" class="setup-form" novalidate>
-            <section class="form-card" aria-labelledby="details-title">
+            <section id="details" class="form-card" aria-labelledby="details-title">
               <div class="card-heading">
                 <div>
                   <p class="section-index">01 / 基本資料</p>
                   <h2 id="details-title">你的領板資訊</h2>
                 </div>
-                <span class="required-hint">皆為必填</span>
+                <span class="required-hint">全部必填</span>
               </div>
               <div class="field-grid">
                 <label class="field">
@@ -125,7 +219,7 @@
                   />
                 </label>
                 <label class="field">
-                  <span>雪板編號</span>
+                  <span>寄存編號</span>
                   <input
                     id="board-number"
                     name="board_number"
@@ -137,16 +231,25 @@
                     required
                   />
                 </label>
+                <label class="field">
+                  <span>雪板類型</span>
+                  <select id="ski-type" name="ski_type" required aria-describedby="ski-type-help">
+                    <option value="">請選擇雪板類型</option>
+                    <option value="single">單板</option>
+                    <option value="double">雙板</option>
+                  </select>
+                  <small id="ski-type-help">選擇單板或雙板</small>
+                </label>
               </div>
             </section>
 
-            <section class="form-card photo-section" aria-labelledby="photos-title">
+            <section id="photos" class="form-card photo-section" aria-labelledby="photos-title">
               <div class="card-heading">
                 <div>
                   <p class="section-index">02 / 證明照片</p>
                   <h2 id="photos-title">上傳三張照片</h2>
                 </div>
-                <p class="photo-note">選擇後會移除位置與裝置中繼資料。</p>
+                <p class="photo-note">照片會先移除位置與裝置資訊</p>
               </div>
 
               <div class="photo-grid">
@@ -161,7 +264,7 @@
                   <div class="photo-copy">
                     <p class="photo-number">PHOTO 01</p>
                     <h3>雪板照片</h3>
-                    <p>一張可辨識雪板的照片。</p>
+                    <p>需看清整塊雪板</p>
                   </div>
                   <div class="photo-actions">
                     <label class="button button-photo">
@@ -183,7 +286,7 @@
                   <div class="photo-copy">
                     <p class="photo-number">PHOTO 02</p>
                     <h3>雪卡正面</h3>
-                    <p>卡號與資料需清楚可見。</p>
+                    <p>卡號需清楚可見</p>
                   </div>
                   <div class="photo-actions">
                     <label class="button button-photo">
@@ -205,7 +308,7 @@
                   <div class="photo-copy">
                     <p class="photo-number">PHOTO 03</p>
                     <h3>雪卡反面</h3>
-                    <p>請確保照片沒有反光。</p>
+                    <p>個人照片與有效期需清楚可見</p>
                   </div>
                   <div class="photo-actions">
                     <label class="button button-photo">
@@ -218,19 +321,19 @@
               </div>
             </section>
 
-            <section class="form-card action-card" aria-labelledby="action-title">
+            <section id="submit" class="form-card action-card" aria-labelledby="action-title">
               <div class="save-status" data-save-status data-tone="neutral" aria-live="polite">
                 <span class="save-status-icon" aria-hidden="true"></span>
                 <div>
-                  <strong id="action-title">尚未儲存到此裝置</strong>
-                  <p>完成所有必填資料後，先儲存即可解鎖送出功能。</p>
+                  <strong id="action-title">資料尚未儲存</strong>
+                  <p>填完資料與三張照片後先儲存，才能送出</p>
                 </div>
               </div>
 
               <div class="action-row">
                 <button id="save-button" class="button button-secondary" type="submit">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"></path><path d="M8 4v6h8V4"></path><path d="M8 19v-5h8v5"></path></svg>
-                  儲存到此裝置
+                  儲存資料
                 </button>
                 <button id="submit-button" class="button button-primary" type="button" disabled>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 10 17l9-10"></path></svg>
@@ -238,9 +341,9 @@
                 </button>
               </div>
               <p class="submit-disclosure">
-                按下送出時，姓名、編號與三張照片會短暫傳至 BonskiBoard 伺服器，以匿名方式填寫飛書表單，處理完成後即刪除。
+                送出時資料會暫時傳到伺服器，用於填寫飛書表單，完成後刪除
               </p>
-              <button id="clear-button" class="clear-button" type="button">清除這個裝置的所有資料</button>
+              <button id="clear-button" class="clear-button" type="button">清除已儲存資料</button>
             </section>
           </form>
         </div>
@@ -254,9 +357,9 @@
 
     <dialog id="clear-dialog" class="clear-dialog" aria-labelledby="clear-dialog-title">
       <form method="dialog">
-        <p class="dialog-kicker">此操作無法復原</p>
-        <h2 id="clear-dialog-title">清除這個裝置的資料？</h2>
-        <p>姓名、雪板編號及三張照片會從目前瀏覽器的網站儲存空間刪除。</p>
+        <p class="dialog-kicker">無法復原</p>
+        <h2 id="clear-dialog-title">清除已儲存資料？</h2>
+        <p>姓名、寄存編號、雪板類型與三張照片都會刪除</p>
         <div class="dialog-actions">
           <button class="button button-secondary" value="cancel">保留資料</button>
           <button id="confirm-clear" class="button button-destructive" value="confirm">確認清除</button>

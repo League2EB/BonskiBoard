@@ -43,11 +43,12 @@ def test_submission_sanitizes_images_and_cleans_temporary_files(
     assert response.json() == {
         "ok": True,
         "status": "dry_run_complete",
-        "message": "已完成填寫與附件上傳檢查，未建立正式申請。",
+        "message": "檢查完成，未正式送出。",
     }
     assert len(fake_submitter.calls) == 1
-    assert fake_submitter.calls[0]["name"] == "測試使用者"
-    assert fake_submitter.calls[0]["board_number"] == "B413"
+    assert fake_submitter.calls[0]["name"] == "SYNTHETIC-USER"
+    assert fake_submitter.calls[0]["board_number"] == "TEST-0001"
+    assert fake_submitter.calls[0]["ski_type"] == "single"
 
     for image_bytes in fake_submitter.calls[0]["photos"].values():
         with Image.open(BytesIO(image_bytes)) as image:
@@ -84,12 +85,63 @@ def test_submission_requires_same_origin_header(client) -> None:
     assert response.json()["code"] == "validation_failed"
 
 
-def test_submission_rejects_extra_or_missing_fields(client) -> None:
+def test_submission_rejects_extra_fields(client) -> None:
     data = valid_submission_data() | {"unexpected": "value"}
     response = submit(client, data=data)
 
     assert response.status_code == 422
     assert response.json()["code"] == "validation_failed"
+
+
+def test_submission_rejects_missing_ski_type_before_downstream_submission(
+    client, fake_submitter
+) -> None:
+    data = valid_submission_data()
+    data.pop("ski_type")
+
+    response = submit(client, data=data)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_failed"
+    assert fake_submitter.calls == []
+
+
+def test_submission_rejects_invalid_ski_type_before_downstream_submission(
+    client, fake_submitter
+) -> None:
+    response = submit(
+        client,
+        data=valid_submission_data() | {"ski_type": "single-board"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_failed"
+    assert fake_submitter.calls == []
+
+
+def test_submission_rejects_duplicate_ski_type_before_downstream_submission(
+    client, fake_submitter
+) -> None:
+    data = valid_submission_data()
+    files = valid_submission_files()
+    multipart_parts = [
+        ("name", (None, data["name"])),
+        ("board_number", (None, data["board_number"])),
+        ("ski_type", (None, "single")),
+        ("ski_type", (None, "double")),
+        ("board_photo", files["board_photo"]),
+        ("card_front_photo", files["card_front_photo"]),
+        ("card_back_photo", files["card_back_photo"]),
+    ]
+    response = client.post(
+        "/api/submissions",
+        files=multipart_parts,
+        headers=same_origin_headers(),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_failed"
+    assert fake_submitter.calls == []
 
 
 def test_submission_rejects_non_image_upload(client) -> None:
@@ -153,12 +205,87 @@ def test_static_assets_are_available(client) -> None:
     html = client.get("/")
     javascript = client.get("/static/app.js")
     theme = client.get("/pokemon-theme.css")
+    icon = client.get("/static/icon.png")
 
     assert html.status_code == 200
     assert "BonskiBoard" in html.text
+    assert 'property="og:type" content="website"' in html.text
+    assert 'property="og:site_name" content="BonskiBoard"' in html.text
+    assert 'property="og:title" content="BonskiBoard 領板申請"' in html.text
+    assert (
+        'property="og:description" content="BonskiBoard 廣州融創寄存區領板助手"'
+        in html.text
+    )
+    assert (
+        'property="og:image" content="/static/bonskiboard-share-card-final.png"'
+        in html.text
+    )
+    assert 'property="og:image:type" content="image/png"' in html.text
+    assert 'property="og:image:width" content="1200"' in html.text
+    assert 'property="og:image:height" content="630"' in html.text
+    assert (
+        'property="og:image:alt" content="BonskiBoard 廣州融創寄存區領板助手"'
+        in html.text
+    )
+    assert 'name="twitter:card" content="summary_large_image"' in html.text
+    assert 'name="twitter:title" content="BonskiBoard 領板申請"' in html.text
+    assert (
+        'name="twitter:description" content="BonskiBoard 廣州融創寄存區領板助手"'
+        in html.text
+    )
+    assert (
+        'name="twitter:image" content="/static/bonskiboard-share-card-final.png"'
+        in html.text
+    )
+    assert (
+        'name="twitter:image:alt" content="BonskiBoard 廣州融創寄存區領板助手"'
+        in html.text
+    )
+    assert 'rel="icon" href="/static/icon.png" type="image/png"' in html.text
+    assert 'rel="apple-touch-icon" href="/static/icon.png"' in html.text
+    assert '<img src="/static/icon.png" alt="" />' in html.text
     storage = client.get("/static/storage.js")
     assert javascript.status_code == 200
+    assert icon.status_code == 200
+    assert icon.headers["content-type"] == "image/png"
+    assert icon.content == (Path(__file__).resolve().parents[1] / "icon.png").read_bytes()
+    share_card = client.get("/static/bonskiboard-share-card-final.png")
+    assert share_card.status_code == 200
+    assert share_card.headers["content-type"] == "image/png"
+    assert share_card.content == (
+        Path(__file__).resolve().parents[1] / "bonskiboard-share-card-final.png"
+    ).read_bytes()
     assert "localStorage" in storage.text
     assert "indexedDB" in storage.text
+    assert 'name="ski_type"' in html.text
+    assert 'value="single"' in html.text
+    assert 'value="double"' in html.text
+    assert "schemaVersion: 2" in storage.text
+    assert "profile.schemaVersion === 1" in storage.text
+    assert 'profile.skiType === "single" || profile.skiType === "double"' in storage.text
+    assert "needsSkiTypeSelection" in storage.text
+    assert 'data-quick-submit' in html.text
+    assert 'id="quick-submit-button"' in html.text
+    assert "quickSubmitButton.addEventListener" in javascript.text
+    assert "renderQuickSubmit" in javascript.text
+    assert "這幹嘛的？" in html.text
+    assert "目前只支援廣州融創滑雪場寄存區" in html.text
+    assert "非官方工具" in html.text
+    assert 'href="#about"' in html.text
+    assert 'href="#details"' in html.text
+    assert 'href="#photos"' in html.text
+    assert 'href="#submit"' in html.text
+    assert "卡號需清楚可見" in html.text
+    assert "個人照片與有效期需清楚可見" in html.text
+    assert "點選「再次填寫」" in html.text
+    assert "重新輸入資料、重新選照片，很麻煩。" in html.text
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert '"description": "廣州融創寄存區領板助手"' in manifest.text
+    assert '"src": "/static/icon.png"' in manifest.text
+    assert '"sizes": "1254x1254"' in manifest.text
+    service_worker = client.get("/service-worker.js")
+    assert "bonski-board-v8" in service_worker.text
+    assert '"/static/icon.png"' in service_worker.text
     assert theme.status_code == 200
     assert "--primary: #5acdbd" in theme.text

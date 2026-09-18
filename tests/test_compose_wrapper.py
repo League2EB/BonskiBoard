@@ -13,7 +13,6 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_SCRIPT = PROJECT_ROOT / "scripts" / "compose.sh"
-LEGACY_SCRIPT = PROJECT_ROOT / "scripts" / "orbstack-compose.sh"
 
 
 FAKE_DOCKER = """#!/bin/sh
@@ -27,6 +26,9 @@ fi
 
 printf '%s\\n' "${DOCKER_CONFIG-}" > "$CAPTURE_DOCKER_CONFIG"
 printf '%s\\n' "${DOCKER_HOST-}" > "$CAPTURE_DOCKER_HOST"
+printf '%s\\n' "${BONSKI_PYTHON_BASE_IMAGE-}" > "$CAPTURE_PYTHON_BASE_IMAGE"
+printf '%s\\n' "${BONSKI_DEBIAN_MIRROR-}" > "$CAPTURE_DEBIAN_MIRROR"
+printf '%s\\n' "${BONSKI_PIP_INDEX_URL-}" > "$CAPTURE_PIP_INDEX_URL"
 if [ -n "${DOCKER_CONFIG-}" ] && [ -f "$DOCKER_CONFIG/config.json" ]; then
     cat "$DOCKER_CONFIG/config.json" > "$CAPTURE_CONFIG_JSON"
 fi
@@ -53,6 +55,10 @@ def wrapper_environment(tmp_path: Path) -> dict[str, str]:
         "DOCKER_CONFIG",
         "DOCKER_HOST",
         "BONSKI_DOCKER_CONFIG_MODE",
+        "BONSKI_NETWORK_MODE",
+        "BONSKI_PYTHON_BASE_IMAGE",
+        "BONSKI_DEBIAN_MIRROR",
+        "BONSKI_PIP_INDEX_URL",
         "COMPOSE_STATUS",
         "COMPOSE_VERSION_STATUS",
     ):
@@ -65,6 +71,9 @@ def wrapper_environment(tmp_path: Path) -> dict[str, str]:
             "CAPTURE_DOCKER_CONFIG": str(tmp_path / "docker-config"),
             "CAPTURE_DOCKER_HOST": str(tmp_path / "docker-host"),
             "CAPTURE_CONFIG_JSON": str(tmp_path / "config-json"),
+            "CAPTURE_PYTHON_BASE_IMAGE": str(tmp_path / "python-base-image"),
+            "CAPTURE_DEBIAN_MIRROR": str(tmp_path / "debian-mirror"),
+            "CAPTURE_PIP_INDEX_URL": str(tmp_path / "pip-index-url"),
         }
     )
     return environment
@@ -93,6 +102,10 @@ def fake_docker(path: Path) -> None:
 
 def trace(environment: dict[str, str]) -> list[str]:
     return Path(environment["TRACE_FILE"]).read_text().splitlines()
+
+
+def captured_value(environment: dict[str, str], name: str) -> str:
+    return Path(environment[f"CAPTURE_{name}"]).read_text().strip()
 
 
 def utility_path(tmp_path: Path, *names: str) -> str:
@@ -137,6 +150,102 @@ def test_explicit_docker_bin_overrides_path(
 
     assert result.returncode == 0, result.stderr
     assert trace(wrapper_environment) == ["compose version", "compose config"]
+
+
+def test_default_network_mode_does_not_set_build_sources(
+    tmp_path: Path, wrapper_environment: dict[str, str]
+) -> None:
+    bin_dir = tmp_path / "bin"
+    fake_docker(bin_dir / "docker")
+    wrapper_environment.update(
+        {
+            "PATH": str(bin_dir),
+            "BONSKI_NETWORK_MODE": "default",
+        }
+    )
+
+    result = run_wrapper(COMPOSE_SCRIPT, wrapper_environment, "config")
+
+    assert result.returncode == 0, result.stderr
+    assert captured_value(wrapper_environment, "PYTHON_BASE_IMAGE") == ""
+    assert captured_value(wrapper_environment, "DEBIAN_MIRROR") == ""
+    assert captured_value(wrapper_environment, "PIP_INDEX_URL") == ""
+
+
+def test_china_network_mode_sets_project_build_source_defaults(
+    tmp_path: Path, wrapper_environment: dict[str, str]
+) -> None:
+    bin_dir = tmp_path / "bin"
+    fake_docker(bin_dir / "docker")
+    wrapper_environment.update(
+        {
+            "PATH": str(bin_dir),
+            "BONSKI_NETWORK_MODE": "china",
+        }
+    )
+
+    result = run_wrapper(COMPOSE_SCRIPT, wrapper_environment, "config")
+
+    assert result.returncode == 0, result.stderr
+    assert captured_value(wrapper_environment, "PYTHON_BASE_IMAGE") == (
+        "docker.1ms.run/library/python:3.12-slim-bookworm"
+    )
+    assert captured_value(wrapper_environment, "DEBIAN_MIRROR") == (
+        "https://mirrors.ustc.edu.cn/debian"
+    )
+    assert captured_value(wrapper_environment, "PIP_INDEX_URL") == (
+        "https://mirrors.aliyun.com/pypi/simple/"
+    )
+
+
+def test_china_network_mode_preserves_caller_build_source_overrides(
+    tmp_path: Path, wrapper_environment: dict[str, str]
+) -> None:
+    bin_dir = tmp_path / "bin"
+    fake_docker(bin_dir / "docker")
+    wrapper_environment.update(
+        {
+            "PATH": str(bin_dir),
+            "BONSKI_NETWORK_MODE": "china",
+            "BONSKI_PYTHON_BASE_IMAGE": (
+                "docker.xuanyuan.me/library/python:3.12-slim-bookworm"
+            ),
+            "BONSKI_DEBIAN_MIRROR": "https://debian.example.test/debian",
+            "BONSKI_PIP_INDEX_URL": "https://pypi.example.test/simple",
+        }
+    )
+
+    result = run_wrapper(COMPOSE_SCRIPT, wrapper_environment, "config")
+
+    assert result.returncode == 0, result.stderr
+    assert captured_value(wrapper_environment, "PYTHON_BASE_IMAGE") == (
+        "docker.xuanyuan.me/library/python:3.12-slim-bookworm"
+    )
+    assert captured_value(wrapper_environment, "DEBIAN_MIRROR") == (
+        "https://debian.example.test/debian"
+    )
+    assert captured_value(wrapper_environment, "PIP_INDEX_URL") == (
+        "https://pypi.example.test/simple"
+    )
+
+
+def test_rejects_invalid_network_mode(
+    tmp_path: Path, wrapper_environment: dict[str, str]
+) -> None:
+    bin_dir = tmp_path / "bin"
+    fake_docker(bin_dir / "docker")
+    wrapper_environment.update(
+        {
+            "PATH": str(bin_dir),
+            "BONSKI_NETWORK_MODE": "unsupported",
+        }
+    )
+
+    result = run_wrapper(COMPOSE_SCRIPT, wrapper_environment, "config")
+
+    assert result.returncode == 1
+    assert "Invalid BONSKI_NETWORK_MODE" in result.stderr
+    assert not Path(wrapper_environment["TRACE_FILE"]).exists()
 
 
 def test_invalid_explicit_docker_bin_fails_without_fallback(
@@ -386,24 +495,4 @@ def test_forwards_compose_exit_code(
     result = run_wrapper(COMPOSE_SCRIPT, wrapper_environment, "config")
 
     assert result.returncode == 23
-    assert trace(wrapper_environment) == ["compose version", "compose config"]
-
-
-def test_legacy_entry_point_works_from_another_directory(
-    tmp_path: Path, wrapper_environment: dict[str, str]
-) -> None:
-    bin_dir = tmp_path / "bin"
-    fake_docker(bin_dir / "docker")
-    other_directory = tmp_path / "elsewhere"
-    other_directory.mkdir()
-    wrapper_environment["PATH"] = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
-
-    result = run_wrapper(
-        LEGACY_SCRIPT,
-        wrapper_environment,
-        "config",
-        cwd=other_directory,
-    )
-
-    assert result.returncode == 0, result.stderr
     assert trace(wrapper_environment) == ["compose version", "compose config"]

@@ -36,17 +36,17 @@ async def sanitize_upload(
         raise ApiError(
             "unsupported_image",
             422,
-            "照片必須是 JPEG、PNG 或 WebP 圖片。",
+            "請選擇 JPEG、PNG 或 WebP 格式的照片。",
         )
 
     source = await upload.read(settings.max_image_bytes + 1)
     if not source:
-        raise ApiError("unsupported_image", 422, "照片檔案不能是空的。")
+        raise ApiError("unsupported_image", 422, "照片是空檔，請重新選擇。")
     if len(source) > settings.max_image_bytes:
         raise ApiError(
             "image_too_large",
             413,
-            "單張照片超過大小限制，請選擇較小的圖片。",
+            "照片太大，請選擇較小的圖片。",
         )
 
     target = destination / f"{role}.jpg"
@@ -56,13 +56,13 @@ async def sanitize_upload(
         raise ApiError(
             "image_too_large",
             413,
-            "照片解析度過大，請選擇較小的圖片。",
+            "照片解析度太高，請選擇較小的圖片。",
         ) from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ApiError(
             "unsupported_image",
             422,
-            "無法讀取這張照片，請重新選擇有效圖片。",
+            "無法讀取這張照片，請重新選擇。",
         ) from exc
 
     return SanitizedPhoto(role=role, path=target)

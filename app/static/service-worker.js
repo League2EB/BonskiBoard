@@ -1,7 +1,8 @@
-const CACHE_NAME = "bonski-board-v1";
+const CACHE_NAME = "bonski-board-v8";
 const APP_SHELL = [
   "/",
   "/pokemon-theme.css",
+  "/static/icon.png",
   "/static/styles.css",
   "/static/app.js",
   "/static/storage.js",

@@ -23,7 +23,7 @@ export async function reencodeImage(file, { maxEdge = 2048, quality = 0.91 } = {
 
     const blob = await new Promise((resolve, reject) => {
       canvas.toBlob(
-        (result) => (result ? resolve(result) : reject(new Error("無法處理這張照片。"))),
+        (result) => (result ? resolve(result) : reject(new Error("無法處理這張照片，請重新選擇。"))),
         "image/jpeg",
         quality,
       );

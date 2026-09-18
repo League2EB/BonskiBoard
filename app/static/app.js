@@ -13,14 +13,27 @@ import {
 const form = document.querySelector("#profile-form");
 const nameInput = document.querySelector("#name");
 const boardNumberInput = document.querySelector("#board-number");
+const skiTypeInput = document.querySelector("#ski-type");
 const saveButton = document.querySelector("#save-button");
 const submitButton = document.querySelector("#submit-button");
+const quickSubmitButton = document.querySelector("#quick-submit-button");
 const clearButton = document.querySelector("#clear-button");
 const clearDialog = document.querySelector("#clear-dialog");
 const confirmClearButton = document.querySelector("#confirm-clear");
 const saveStatus = document.querySelector("[data-save-status]");
 const resultAnnouncement = document.querySelector("#result-announcement");
 const resultText = resultAnnouncement.querySelector("p");
+const hero = document.querySelector(".hero");
+const quickSubmit = document.querySelector("[data-quick-submit]");
+const quickSubmitName = document.querySelector("[data-quick-name]");
+const quickSubmitBoardNumber = document.querySelector("[data-quick-board-number]");
+const quickSubmitSkiType = document.querySelector("[data-quick-ski-type]");
+const quickSubmitPhotoCount = document.querySelector("[data-quick-photo-count]");
+const submitButtons = [submitButton, quickSubmitButton];
+const SKI_TYPE_LABELS = {
+  single: "單板",
+  double: "雙板",
+};
 
 const state = {
   photos: Object.fromEntries(PHOTO_ROLES.map((role) => [role, null])),
@@ -40,7 +53,7 @@ const photoCards = Object.fromEntries(
 
 initialize().catch((error) => {
   console.error("BonskiBoard initialization failed", error);
-  showResult("error", "無法讀取這個裝置的儲存空間，請檢查瀏覽器設定後重新開啟。");
+  showResult("error", "無法讀取目前瀏覽器的儲存資料，請檢查設定後重新開啟");
 });
 
 async function initialize() {
@@ -68,6 +81,7 @@ async function restoreSavedData() {
   if (profile) {
     nameInput.value = profile.name;
     boardNumberInput.value = profile.boardNumber;
+    skiTypeInput.value = profile.skiType;
   }
 
   await Promise.all(PHOTO_ROLES.map(async (role) => {
@@ -79,12 +93,16 @@ async function restoreSavedData() {
   }));
 
   state.hasSavedProfile = Boolean(profile) && isComplete();
+  if (profile?.needsSkiTypeSelection) {
+    showResult("warning", "已恢復姓名、寄存編號與照片。請選擇雪板類型後重新儲存");
+  }
 }
 
 function bindEvents() {
   form.addEventListener("submit", saveCurrentData);
   nameInput.addEventListener("input", markDirty);
   boardNumberInput.addEventListener("input", markDirty);
+  skiTypeInput.addEventListener("change", markDirty);
 
   document.querySelectorAll("[data-photo-input]").forEach((input) => {
     input.addEventListener("change", handlePhotoSelection);
@@ -96,6 +114,7 @@ function bindEvents() {
   });
 
   submitButton.addEventListener("click", submitApplication);
+  quickSubmitButton.addEventListener("click", submitApplication);
   clearButton.addEventListener("click", requestClear);
   clearDialog.addEventListener("close", () => {
     if (clearDialog.returnValue === "confirm") clearAllData();
@@ -123,7 +142,7 @@ async function handlePhotoSelection(event) {
     setPreview(role, photo);
     markDirty();
   } catch (error) {
-    showResult("error", error instanceof Error ? error.message : "無法處理這張照片。");
+    showResult("error", error instanceof Error ? error.message : "無法處理這張照片，請重新選擇");
   } finally {
     state.processing.delete(role);
     render();
@@ -158,11 +177,11 @@ function removeCurrentPhoto(role) {
 async function saveCurrentData(event) {
   event.preventDefault();
   if (state.processing.size) {
-    showResult("warning", "請等待照片處理完成後再儲存。");
+    showResult("warning", "請等待照片處理完成後再儲存");
     return;
   }
   if (!isComplete()) {
-    showResult("warning", "請完成姓名、雪板編號與三張照片後再儲存。");
+    showResult("warning", "請填寫姓名、寄存編號、雪板類型，並選擇三張照片後再儲存");
     focusFirstMissingField();
     return;
   }
@@ -171,7 +190,8 @@ async function saveCurrentData(event) {
   try {
     const name = normalizedName();
     const boardNumber = normalizedBoardNumber();
-    saveProfile({ name, boardNumber });
+    const skiType = normalizedSkiType();
+    saveProfile({ name, boardNumber, skiType });
     await Promise.all(PHOTO_ROLES.map(async (role) => {
       const photo = state.photos[role];
       if (photo) await putPhoto(role, photo);
@@ -180,29 +200,31 @@ async function saveCurrentData(event) {
     state.dirty = false;
     state.hasSavedProfile = true;
     render();
-    showResult("success", "已儲存到此裝置。下次開啟 BonskiBoard 時會自動恢復。");
+    showResult("success", "資料已儲存。下次開啟 BonskiBoard 會自動載入");
   } catch (error) {
     console.error("Unable to save profile", error);
-    showResult("error", "無法儲存到這個裝置，請確認瀏覽器允許網站儲存資料。");
+    showResult("error", "無法儲存資料，請確認瀏覽器允許網站儲存資料");
   } finally {
-    setButtonBusy(saveButton, false, "儲存到此裝置");
+    setButtonBusy(saveButton, false, "儲存資料");
     render();
   }
 }
 
 async function submitApplication() {
-  if (!state.hasSavedProfile || state.dirty || !isComplete()) {
-    showResult("warning", "請先儲存完整且最新的資料，再送出申請。");
+  if (state.submitting) return;
+  if (state.processing.size > 0 || !isSavedProfileReady()) {
+    showResult("warning", "請先儲存完整且最新的資料，再送出申請");
     return;
   }
 
   state.submitting = true;
-  setButtonBusy(submitButton, true, "處理中");
+  setSubmitButtonsBusy(true);
   render();
   try {
     const data = new FormData();
     data.set("name", normalizedName());
     data.set("board_number", normalizedBoardNumber());
+    data.set("ski_type", normalizedSkiType());
     data.set("board_photo", asUploadFile(state.photos.board_photo, "board-photo.jpg"));
     data.set("card_front_photo", asUploadFile(state.photos.card_front_photo, "card-front.jpg"));
     data.set("card_back_photo", asUploadFile(state.photos.card_back_photo, "card-back.jpg"));
@@ -214,7 +236,7 @@ async function submitApplication() {
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.ok) {
-      throw new Error(payload?.message || "送出失敗，請稍後再試。");
+      throw new Error(payload?.message || "送出失敗，請稍後再試");
     }
 
     showResult(
@@ -224,11 +246,11 @@ async function submitApplication() {
   } catch (error) {
     showResult(
       "error",
-      error instanceof Error ? error.message : "送出失敗，請稍後再試。",
+      error instanceof Error ? error.message : "送出失敗，請稍後再試",
     );
   } finally {
     state.submitting = false;
-    setButtonBusy(submitButton, false, "送出領板申請");
+    setSubmitButtonsBusy(false);
     render();
   }
 }
@@ -242,7 +264,7 @@ function requestClear() {
     clearDialog.showModal();
     return;
   }
-  if (window.confirm("確認清除這個裝置中的姓名、雪板編號與三張照片？")) {
+  if (window.confirm("確認清除已儲存的姓名、寄存編號、雪板類型與三張照片？")) {
     clearAllData();
   }
 }
@@ -253,6 +275,7 @@ async function clearAllData() {
     await clearPhotos();
     nameInput.value = "";
     boardNumberInput.value = "";
+    skiTypeInput.value = "";
     PHOTO_ROLES.forEach((role) => {
       const url = state.previewUrls[role];
       if (url) URL.revokeObjectURL(url);
@@ -266,10 +289,10 @@ async function clearAllData() {
     state.dirty = false;
     state.hasSavedProfile = false;
     render();
-    showResult("success", "已清除這個裝置中的 BonskiBoard 資料。");
+    showResult("success", "已清除儲存資料");
   } catch (error) {
     console.error("Unable to clear profile", error);
-    showResult("error", "無法完整清除資料，請改從瀏覽器設定清除本站資料。");
+    showResult("error", "無法清除已儲存資料，請從瀏覽器設定中清除本站資料");
   }
 }
 
@@ -281,12 +304,23 @@ function normalizedBoardNumber() {
   return boardNumberInput.value.trim();
 }
 
+function normalizedSkiType() {
+  return skiTypeInput.value === "single" || skiTypeInput.value === "double"
+    ? skiTypeInput.value
+    : "";
+}
+
 function isComplete() {
   return Boolean(
     normalizedName()
     && normalizedBoardNumber()
+    && normalizedSkiType()
     && PHOTO_ROLES.every((role) => state.photos[role] instanceof Blob),
   );
+}
+
+function isSavedProfileReady() {
+  return isComplete() && state.hasSavedProfile && !state.dirty && state.processing.size === 0;
 }
 
 function focusFirstMissingField() {
@@ -298,15 +332,23 @@ function focusFirstMissingField() {
     boardNumberInput.focus();
     return;
   }
+  if (!normalizedSkiType()) {
+    skiTypeInput.focus();
+    return;
+  }
   const missingRole = PHOTO_ROLES.find((role) => !state.photos[role]);
   if (missingRole) photoCards[missingRole].querySelector("input").focus();
 }
 
 function render() {
   const complete = isComplete();
-  const canSubmit = complete && state.hasSavedProfile && !state.dirty && !state.submitting;
+  const savedProfileReady = isSavedProfileReady();
+  const canSubmit = savedProfileReady && !state.submitting;
   saveButton.disabled = state.processing.size > 0 || !complete || state.submitting;
-  submitButton.disabled = !canSubmit;
+  submitButtons.forEach((button) => {
+    button.disabled = !canSubmit;
+  });
+  renderQuickSubmit(savedProfileReady);
 
   PHOTO_ROLES.forEach((role) => {
     const card = photoCards[role];
@@ -324,22 +366,45 @@ function render() {
   });
 
   if (state.submitting) {
-    setSaveStatus("info", "正在處理申請", "請勿重新整理或關閉頁面。");
+    setSaveStatus("info", "申請處理中", "請勿重新整理或關閉頁面");
   } else if (state.processing.size > 0) {
-    setSaveStatus("info", "正在處理照片", "照片會在這個裝置重新輸出，移除中繼資料。");
-  } else if (state.hasSavedProfile && !state.dirty) {
-    setSaveStatus("success", "本機資料已準備好", "資料只保存於這個瀏覽器，可以送出領板申請。");
+    setSaveStatus("info", "正在處理照片", "照片會在這個裝置重新輸出並移除中繼資料");
+  } else if (savedProfileReady) {
+    setSaveStatus("success", "資料已準備好", "資料只存在目前瀏覽器，可以送出領板申請");
   } else if (state.dirty) {
-    setSaveStatus("warning", "尚有未儲存的變更", "請儲存更新後的資料，才能送出申請。");
+    setSaveStatus("warning", "資料已修改，尚未儲存", "儲存後才能送出申請");
   } else {
-    setSaveStatus("neutral", "尚未儲存到此裝置", "完成所有必填資料後，先儲存即可解鎖送出功能。");
+    setSaveStatus(
+      "neutral",
+      "資料尚未儲存",
+      "填完資料與三張照片後先儲存，才能送出",
+    );
   }
+}
+
+function renderQuickSubmit(savedProfileReady) {
+  hero.dataset.mode = savedProfileReady ? "returning" : "setup";
+  quickSubmit.hidden = !savedProfileReady;
+  if (!savedProfileReady) return;
+
+  quickSubmitName.textContent = normalizedName();
+  quickSubmitBoardNumber.textContent = normalizedBoardNumber();
+  quickSubmitSkiType.textContent = SKI_TYPE_LABELS[normalizedSkiType()] || "";
+  quickSubmitPhotoCount.textContent = `${PHOTO_ROLES.filter(
+    (role) => state.photos[role] instanceof Blob,
+  ).length} 張照片已準備`;
 }
 
 function setSaveStatus(tone, title, copy) {
   saveStatus.dataset.tone = tone;
   saveStatus.querySelector("strong").textContent = title;
   saveStatus.querySelector("p").textContent = copy;
+}
+
+function setSubmitButtonsBusy(busy) {
+  submitButtons.forEach((button) => {
+    setButtonBusy(button, busy, busy ? "處理中" : "送出領板申請");
+  });
 }
 
 function setButtonBusy(button, busy, label) {

@@ -59,8 +59,34 @@ test-results/
 playwright-report/
 blob-report/
 *.har
+*.pcap
+*.pcapng
+*.saz
+trace*.zip
+screenshots/
+captures/
+downloads/
+playwright/.auth/
+.auth/
+storage-state*.json
+storageState*.json
+cookies*.json
+cookies*.txt
 
 # Local-only test photos and browser captures
 pic/
 curl.txt
 signinday0.txt
+
+# Test and coverage output
+coverage.xml
+junit*.xml
+.cache/
+
+# Local certificates and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore

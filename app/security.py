@@ -58,7 +58,7 @@ def require_same_origin_request(request: Request) -> None:
         raise ApiError(
             "validation_failed",
             403,
-            "請從 BonskiBoard 網頁送出申請。",
+            "請從 BonskiBoard 網頁送出。",
         )
 
     origin = request.headers.get("origin")
@@ -67,7 +67,7 @@ def require_same_origin_request(request: Request) -> None:
         raise ApiError(
             "validation_failed",
             403,
-            "無法驗證送出來源，請重新從本網站操作。",
+            "無法驗證送出來源，請從本站重新操作。",
         )
 
     parsed = urlsplit(origin)
@@ -76,7 +76,7 @@ def require_same_origin_request(request: Request) -> None:
         raise ApiError(
             "validation_failed",
             403,
-            "送出來源不符合目前網站。",
+            "送出來源與目前網站不符。",
         )
 
 
@@ -140,7 +140,7 @@ class MaxRequestBodySizeMiddleware:
             content={
                 "ok": False,
                 "code": "image_too_large",
-                "message": "照片或整個送出資料超過大小限制。",
+                "message": "送出資料超過大小限制。",
             },
         )
         await response(scope, receive, send)

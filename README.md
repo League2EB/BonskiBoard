@@ -1,90 +1,118 @@
-# BonskiBoard
+<p align="center">
+  <img src="icon.png" alt="BonskiBoard icon" width="160">
+</p>
 
-手機優先的雪板領取申請助手。第一次設定姓名、雪板編號與三張照片後，資料只會儲存在目前手機／瀏覽器；日後可由使用者明確按下按鈕，讓後端以全新的匿名瀏覽器工作階段代填固定的飛書表單。
+<h1 align="center">BonskiBoard</h1>
 
-## 隱私與安全邊界
+<p align="center">
+  雪板領取申請助手，目前僅支援廣州融創熱雪奇蹟
+</p>
 
-- 沒有帳號、資料庫或永久後端儲存。
-- 照片在手機端先重編碼為 JPEG，移除 EXIF/GPS；後端在單次請求中再次重編碼。
-- 後端只接受固定的五個 multipart 欄位與固定飛書 URL。
-- 每次送出使用新 Playwright browser context，Cookie、CSRF 和暫存照片會在請求結束後清除。
-- Docker image 使用精簡 Python 基底，只安裝系統 Chromium headless shell，不下載完整的多瀏覽器 Playwright 映像。
-- 預設 `DRY_RUN=true`：會完成匿名表單填寫與附件上傳確認，但**不會點擊正式送出**。
-- 第一版只能部署於本機與受信任區域網路。不要把未受 HTTPS、登入或進階濫用防護保護的 `8080` 直接公開到網際網路。
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Web-0ea5e9?style=for-the-badge&amp;logo=googlechrome&amp;logoColor=white" alt="Platform: Web">
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&amp;logo=python&amp;logoColor=white" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/License-MIT-80C342?style=for-the-badge" alt="License: MIT">
+</p>
 
-## 啟動
+<p align="center">
+  <a href="#why">為什麼要做這個</a> ·
+  <a href="#features">功能</a> ·
+  <a href="#tech">技術</a> ·
+  <a href="#quick-start">快速開始</a> ·
+  <a href="#security">隱私與安全</a> ·
+  <a href="#disclaimer">免責聲明</a> ·
+  <a href="#license">授權</a>
+</p>
 
-使用專案的跨平台 Compose wrapper 啟動。它支援 macOS（含 OrbStack）與 Ubuntu/Linux，會依序使用 `DOCKER_BIN`、PATH 中的 `docker`、`~/.local/bin/docker` 或 OrbStack 的 Docker。系統必須提供 Docker Engine 與 Docker Compose v2（`docker compose`）；Ubuntu 可依 Docker 官方安裝指引安裝 Docker Engine 和 Compose plugin。
+---
 
-預設 `BONSKI_DOCKER_CONFIG_MODE=auto`。若目前 Docker 設定引用了本機缺少的 credential helper，wrapper 會暫時使用空的匿名設定（並保留可用的 Compose plugin），不會修改 `~/.docker/config.json` 或登入資料：
+<a id="why"></a>
+
+## 為什麼要做這個
+因為長期在廣州融創練習，每天的第一件事情就是
+[填寫雪板領取申請表](https://sunac.feishu.cn/share/base/form/shrcndRhW3v7obxceOEymUijK1b)
+
+但，廣州融創熱雪奇蹟提供的飛書表單沒有自動儲存功能
+以至於每天都要輸入一次資料＋上傳照片，五告麻煩。
+
+
+<a id="features"></a>
+
+## 功能
+
+- 在同一個瀏覽器保存姓名、雪板編號、板型與三張照片，並恢復資料與照片預覽。
+- 姓名、編號與板型保存在 localStorage；照片保存在 IndexedDB，不使用後端資料庫。
+- 使用者明確按下送出後，後端以全新的匿名瀏覽器工作階段完成固定飛書表單流程。
+
+<a id="tech"></a>
+
+## 技術
+
+- FastAPI
+- Playwright 與 Chromium
+- 原生 HTML、CSS、JavaScript
+- localStorage 與 IndexedDB
+- Pillow 圖片處理
+- Docker Compose
+
+<a id="quick-start"></a>
+
+## 快速開始
+
+需求：Docker Engine 與 Docker Compose v2。
 
 ```sh
-sh scripts/compose.sh up -d --build
+cp .env.example .env
+docker compose up -d --build
 ```
 
-在 Ubuntu Server 上，請以可存取 Docker daemon 的部署使用者執行相同指令：
+開啟 <http://localhost:8080>。
+
+停止服務：
 
 ```sh
-sh scripts/compose.sh up -d --build
+docker compose down
 ```
 
-開啟：
-
-```text
-http://localhost:8080
-http://<部署主機的區域網路 IP>:8080
-```
-
-查看健康檢查：
+確認流程後，將 `.env` 的 `DRY_RUN` 改為 `false`，再重新建立服務：
 
 ```sh
-curl http://localhost:8080/healthz
+docker compose up -d --build
 ```
 
-停止：
-
-```sh
-sh scripts/compose.sh down
-```
-
-## 正式提交前
-
-1. 保持 `DRY_RUN=true`，先在手機完成本機保存與重整恢復驗證。
-2. 由管理者明確決定是否要執行一次 live dry-run。它仍可能把測試照片預上傳至飛書，但不會建立表單紀錄。
-3. 確認飛書欄位、預設單選值與附件完成狀態符合預期。
-4. 只有確認後才將環境變數改成 `DRY_RUN=false`，並重新建立容器：
-
-   ```sh
-   DRY_RUN=false sh scripts/compose.sh up -d --build
-   ```
-
-正式紀錄只會在使用者從網站明確按下「送出領板申請」後建立。
-
-## 開發與測試
-
-以本機 Python 虛擬環境執行：
+## 開發與驗證
 
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest
-.venv/bin/python -m py_compile app/*.py
 ```
 
-容器驗證：
+<a id="security"></a>
 
-```sh
-sh scripts/compose.sh config
-sh scripts/compose.sh up --build -d
-curl http://localhost:8080/healthz
-```
+## 隱私與安全
 
-可用環境變數：
+- 伺服器不使用帳號系統、永久後端儲存或資料庫。
+- 照片會在瀏覽器與伺服器端重新編碼，以移除 EXIF／GPS 中繼資料。
+- 提交使用的伺服器端照片副本與匿名瀏覽器工作階段會在單一請求結束後清除。
+- 儲存在瀏覽器中不等於加密；共用裝置或同一個瀏覽器 profile 的其他使用者可能讀取資料。
+- 預設 `DRY_RUN=true`。它不會建立正式申請，但飛書的預上傳流程仍可能暫時接收測試附件。
+- 若對外公開部署，必須自行配置 HTTPS、存取控制與濫用防護。請勿直接將未保護的 `8080` 連接埠暴露到網際網路。
 
-- `DOCKER_BIN`：指定 Docker 可執行檔的名稱或路徑。
-- `BONSKI_DOCKER_CONFIG_MODE=auto|default|anonymous`：`auto`（預設）只會在缺少 credential helper 時暫用匿名設定；`default` 保留 Docker 設定；`anonymous` 一律暫用匿名設定。
-- `DOCKER_HOST`：若已設定會完整保留。只有選到 OrbStack Docker 且未設定時，wrapper 才會使用存在的 OrbStack socket。
+公開版測試只使用程式產生的合成圖片。請勿將真實照片、會員卡、瀏覽器登入狀態、
+HTTP 攔截紀錄或其他含個資資料放入工作樹、Docker build context 或版本控制。
 
-舊的 `sh scripts/orbstack-compose.sh ...` 仍是相容入口，但新文件與跨平台使用應使用 `sh scripts/compose.sh ...`。Wrapper 不會安裝 Docker 或 Compose，也不會自行啟動容器；傳入的 Compose 指令才決定操作。
+<a id="disclaimer"></a>
 
-`pic/` 只保留本機 UI / dry-run 測試照片。它們含有原始中繼資料，已由 `.dockerignore` 排除，請勿放進公開 image 或版本控制。
+## 免責聲明
+
+本專案為非官方開源工具，與**廣州熱雪奇蹟**及其營運者、關聯公司、品牌、員工，
+不存在隸屬、合作、授權或背書關係。
+
+飛書為第三方服務。使用者應自行確認使用方式符合相關服務條款及所在地法律，並自行承擔提交內容、部署與使用風險。
+
+<a id="license"></a>
+
+## 授權
+
+本專案以 [MIT License](LICENSE) 授權。

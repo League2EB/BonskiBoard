@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: "${BONSKI_PYTHON_BASE_IMAGE:-python:3.12-slim-bookworm}"
+        DEBIAN_MIRROR: "${BONSKI_DEBIAN_MIRROR:-}"
+        PIP_INDEX_URL: "${BONSKI_PIP_INDEX_URL:-}"
     restart: unless-stopped
     ports:
       - "8080:8080"

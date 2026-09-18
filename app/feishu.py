@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Optional
 
 from playwright.async_api import (
     Browser,
@@ -23,13 +25,47 @@ from .settings import Settings
 FIELD_IDS = {
     "name": "fldZJlD0Ox",
     "board_number": "fldRpJzAGC",
+    "ski_type": "fldFD4KWOC",
     "board_photo": "fldBBvxZS1",
     "card_photos": "fldP0AVcVb",
 }
 
+SKI_TYPE_CHOICES = {
+    "single": ("单板", "optHOXFuMJ"),
+    "double": ("双板", "optFPiQW0g"),
+}
+SKI_TYPE_CONTROL_SELECTOR = (
+    '[data-form-control-interactive-root="true"], '
+    "[role='combobox'], [role='button'], button, select, "
+    "[aria-haspopup='listbox']"
+)
+CURRENT_FORM_CONTAINER_SELECTORS = tuple(
+    f"#field-item-{FIELD_IDS[kind]}"
+    for kind in (
+        "name",
+        "board_number",
+        "ski_type",
+        "board_photo",
+        "card_photos",
+    )
+)
+
 TEXT_TERMS = {
     "name": ("姓名", "name"),
-    "board_number": ("雪板編號", "雪板编号", "雪板號", "雪板号", "板號", "board"),
+    "board_number": (
+        "寄存編號",
+        "寄存编号",
+        "寄存號",
+        "寄存号",
+        "storage number",
+        "storage",
+        "雪板編號",
+        "雪板编号",
+        "雪板號",
+        "雪板号",
+        "板號",
+        "board",
+    ),
 }
 
 PHOTO_TERMS = {
@@ -44,6 +80,8 @@ PHOTO_TERMS = {
         "会员卡",
     ),
 }
+
+LOGGER = logging.getLogger("bonskiboard.feishu")
 
 
 @dataclass(frozen=True)
@@ -63,61 +101,61 @@ class FeishuSubmitter:
         *,
         name: str,
         board_number: str,
+        ski_type: str,
         photos: dict[str, SanitizedPhoto],
     ) -> SubmissionResult:
-        browser: Browser | None = None
-        context: Any | None = None
         try:
             async with async_playwright() as playwright:
-                launch_options: dict[str, Any] = {
-                    "headless": True,
-                    "args": ["--disable-dev-shm-usage"],
-                }
-                if self.settings.chromium_executable_path:
-                    launch_options["executable_path"] = (
-                        self.settings.chromium_executable_path
+                browser: Optional[Browser] = None
+                try:
+                    launch_options: dict[str, Any] = {
+                        "headless": True,
+                        "args": ["--disable-dev-shm-usage"],
+                    }
+                    if self.settings.chromium_executable_path:
+                        launch_options["executable_path"] = (
+                            self.settings.chromium_executable_path
+                        )
+                        launch_options["args"].append("--no-sandbox")
+                    browser = await playwright.chromium.launch(**launch_options)
+                    context = await browser.new_context(
+                        accept_downloads=False,
+                        viewport={"width": 1280, "height": 900},
+                        locale="zh-TW",
                     )
-                    launch_options["args"].append("--no-sandbox")
-                browser = await playwright.chromium.launch(**launch_options)
-                context = await browser.new_context(
-                    accept_downloads=False,
-                    viewport={"width": 1280, "height": 900},
-                    locale="zh-TW",
-                )
-                page = await context.new_page()
-                page.set_default_timeout(self.settings.playwright_timeout_ms)
-                await self._complete_form(
-                    page=page,
-                    name=name,
-                    board_number=board_number,
-                    photos=photos,
-                )
-                if self.settings.dry_run:
-                    return SubmissionResult(
-                        status="dry_run_complete",
-                        message="已完成填寫與附件上傳檢查，未建立正式申請。",
+                    page = await context.new_page()
+                    page.set_default_timeout(self.settings.playwright_timeout_ms)
+                    await self._complete_form(
+                        page=page,
+                        name=name,
+                        board_number=board_number,
+                        ski_type=ski_type,
+                        photos=photos,
                     )
-                await self._submit(page)
-                return SubmissionResult(status="submitted", message="申請已送出。")
+                    if self.settings.dry_run:
+                        return SubmissionResult(
+                            status="dry_run_complete",
+                            message="檢查完成，未正式送出。",
+                        )
+                    await self._submit(page)
+                    return SubmissionResult(status="submitted", message="申請已送出。")
+                finally:
+                    if browser:
+                        await browser.close()
         except ApiError:
             raise
         except PlaywrightTimeoutError as exc:
             raise ApiError(
                 "submit_timeout",
                 504,
-                "飛書表單等待逾時，請稍後再試。",
+                "飛書表單逾時，請稍後再試。",
             ) from exc
         except Exception as exc:
             raise ApiError(
                 "submit_failed",
                 502,
-                "飛書表單目前無法完成送出，請稍後再試。",
+                "飛書暫時無法送出，請稍後再試。",
             ) from exc
-        finally:
-            if context:
-                await context.close()
-            if browser:
-                await browser.close()
 
     async def _complete_form(
         self,
@@ -125,6 +163,7 @@ class FeishuSubmitter:
         page: Page,
         name: str,
         board_number: str,
+        ski_type: str,
         photos: dict[str, SanitizedPhoto],
     ) -> None:
         await page.goto(
@@ -133,41 +172,40 @@ class FeishuSubmitter:
             timeout=self.settings.playwright_timeout_ms,
         )
         await page.wait_for_load_state("networkidle")
+        await self._wait_for_current_form_ready(page)
 
         name_input = await self._resolve_control(
             page,
             kind="name",
-            selector="input:not([type='hidden']), textarea",
+            selector="[contenteditable='true'], input:not([type='hidden']), textarea",
+            legacy_selector="input:not([type='hidden']), textarea",
             terms=TEXT_TERMS["name"],
         )
         board_number_input = await self._resolve_control(
             page,
             kind="board_number",
-            selector="input:not([type='hidden']), textarea",
+            selector="[contenteditable='true'], input:not([type='hidden']), textarea",
+            legacy_selector="input:not([type='hidden']), textarea",
             terms=TEXT_TERMS["board_number"],
         )
         board_photo_input = await self._resolve_control(
             page,
             kind="board_photo",
             selector="input[type='file']",
+            legacy_selector="input[type='file']",
             terms=PHOTO_TERMS["board_photo"],
         )
         card_photo_input = await self._resolve_control(
             page,
             kind="card_photos",
             selector="input[type='file']",
+            legacy_selector="input[type='file']",
             terms=PHOTO_TERMS["card_photos"],
         )
-        # The form must still expose the expected single and multi-upload controls.
-        if await board_photo_input.get_attribute("multiple") is not None:
-            raise self._layout_changed()
-        if await card_photo_input.get_attribute("multiple") is None:
-            raise self._layout_changed()
-        if not await self._has_default_choice(page):
-            raise self._layout_changed()
 
         await name_input.fill(name)
         await board_number_input.fill(board_number)
+        await self._select_ski_type(page, ski_type)
         await board_photo_input.set_input_files(str(photos["board_photo"].path))
         await card_photo_input.set_input_files(
             [
@@ -175,6 +213,8 @@ class FeishuSubmitter:
                 str(photos["card_back_photo"].path),
             ]
         )
+        await self._require_attachment_file_count(board_photo_input, expected_count=1)
+        await self._require_attachment_file_count(card_photo_input, expected_count=2)
         await self._wait_for_uploads(
             page,
             (
@@ -184,13 +224,25 @@ class FeishuSubmitter:
             ),
         )
 
-        submit_button = page.get_by_role(
-            "button",
-            name=re.compile(r"^(送出|提交|submit)$", re.IGNORECASE),
+        await self._resolve_submit_button(page)
+
+    async def _wait_for_current_form_ready(self, page: Page) -> None:
+        """Wait for delayed current-layout fields without changing legacy fallback."""
+
+        ski_type_container = page.locator(
+            f"#field-item-{FIELD_IDS['ski_type']}"
         )
-        if await submit_button.count() != 1:
-            raise self._layout_changed()
-        await submit_button.wait_for(state="visible")
+        if await ski_type_container.count() == 0:
+            return
+        try:
+            await asyncio.gather(
+                *(
+                    page.locator(selector).wait_for(state="attached")
+                    for selector in CURRENT_FORM_CONTAINER_SELECTORS
+                )
+            )
+        except PlaywrightTimeoutError as exc:
+            raise self._layout_changed("form_ready_guard") from exc
 
     async def _resolve_control(
         self,
@@ -198,20 +250,34 @@ class FeishuSubmitter:
         *,
         kind: str,
         selector: str,
+        legacy_selector: str,
         terms: tuple[str, ...],
     ) -> Locator:
-        """Resolve a single target by its visible local field context.
+        """Resolve one control in a stable field container or safe legacy context.
 
-        An exposed historical field ID is only used to narrow a matching,
-        labelled field. It is never treated as an API contract by itself.
+        When a verified field container exists, any missing or ambiguous control
+        is a hard stop. Older forms without that container retain the previous
+        labelled input/textarea lookup as a narrowly scoped fallback.
         """
 
-        controls = page.locator(selector)
+        field = page.locator(f"#field-item-{FIELD_IDS[kind]}")
+        field_count = await field.count()
+        if field_count:
+            if field_count != 1:
+                raise self._layout_changed("control_container_guard")
+            controls = field.locator(selector)
+            return await self._require_single_control(
+                controls,
+                kind=kind,
+                require_visible=kind not in PHOTO_TERMS,
+            )
+
+        controls = page.locator(legacy_selector)
         count = await controls.count()
         candidates: list[tuple[Locator, str]] = []
         for index in range(count):
             control = controls.nth(index)
-            if selector != "input[type='file']" and not await control.is_visible():
+            if kind not in PHOTO_TERMS and not await control.is_visible():
                 continue
             context = await control.evaluate(
                 """(element) => {
@@ -245,29 +311,68 @@ class FeishuSubmitter:
         ]
         if len(matching) == 1:
             return matching[0][0]
+        raise self._layout_changed("control_legacy_guard")
 
-        # Diagnostic fallback: only accept a uniquely exposed known field ID.
-        field_id = FIELD_IDS[kind]
-        id_scoped = page.locator(
-            f"[data-field-id='{field_id}'] {selector}, "
-            f"[data-fieldid='{field_id}'] {selector}, "
-            f"[data-field_id='{field_id}'] {selector}, "
-            f"#{field_id} {selector}"
+    async def _require_single_control(
+        self,
+        controls: Locator,
+        *,
+        kind: str,
+        require_visible: bool,
+    ) -> Locator:
+        matches = []
+        for index in range(await controls.count()):
+            control = controls.nth(index)
+            if not require_visible or await control.is_visible():
+                matches.append(control)
+        if len(matches) != 1:
+            raise self._layout_changed("control_guard")
+        return matches[0]
+
+    async def _select_ski_type(self, page: Page, ski_type: str) -> None:
+        if ski_type not in SKI_TYPE_CHOICES:
+            raise self._layout_changed("ski_type_value_guard")
+
+        field = page.locator(f"#field-item-{FIELD_IDS['ski_type']}")
+        if await field.count() != 1:
+            raise self._layout_changed("ski_type_control_guard")
+        control = await self._require_single_control(
+            field.locator(SKI_TYPE_CONTROL_SELECTOR),
+            kind="ski_type",
+            require_visible=True,
         )
-        visible_matches = [
-            id_scoped.nth(index)
-            for index in range(await id_scoped.count())
-            if selector == "input[type='file']"
-            or await id_scoped.nth(index).is_visible()
-        ]
-        if len(visible_matches) == 1:
-            return visible_matches[0]
-        raise self._layout_changed()
+        await control.click()
+        await self._click_expected_ski_type_option(page, ski_type)
 
-    async def _has_default_choice(self, page: Page) -> bool:
-        native_selected = page.locator("input[type='radio']:checked")
-        accessible_selected = page.locator("[role='radio'][aria-checked='true']")
-        return (await native_selected.count()) > 0 or (await accessible_selected.count()) > 0
+    async def _click_expected_ski_type_option(self, page: Page, ski_type: str) -> None:
+        visible_text = SKI_TYPE_CHOICES[ski_type][0]
+        options = page.get_by_text(visible_text, exact=True)
+        matches = [
+            options.nth(index)
+            for index in range(await options.count())
+            if await options.nth(index).is_visible()
+        ]
+        if len(matches) != 1:
+            raise self._layout_changed("ski_type_option_guard")
+        await matches[0].click()
+
+    async def _require_attachment_file_count(
+        self, control: Locator, *, expected_count: int
+    ) -> None:
+        try:
+            file_count = await control.evaluate(
+                """(element) => (
+                    element instanceof HTMLInputElement
+                    && element.type === 'file'
+                    && element.files
+                    ? element.files.length
+                    : null
+                )"""
+            )
+        except Exception as exc:
+            raise self._layout_changed("attachment_file_count_guard") from exc
+        if file_count != expected_count:
+            raise self._layout_changed("attachment_file_count_guard")
 
     async def _wait_for_uploads(self, page: Page, filenames: tuple[str, ...]) -> None:
         try:
@@ -277,14 +382,11 @@ class FeishuSubmitter:
             raise ApiError(
                 "upload_failed",
                 502,
-                "至少一張照片未完成上傳，請稍後再試。",
+                "照片上傳未完成，請稍後再試。",
             ) from exc
 
     async def _submit(self, page: Page) -> None:
-        submit_button = page.get_by_role(
-            "button",
-            name=re.compile(r"^(送出|提交|submit)$", re.IGNORECASE),
-        )
+        submit_button = await self._resolve_submit_button(page)
         try:
             async with page.expect_response(
                 lambda response: (
@@ -298,7 +400,7 @@ class FeishuSubmitter:
                 raise ApiError(
                     "submit_failed",
                     502,
-                    "飛書未確認申請送出，請稍後再試。",
+                    "飛書未確認送出，請稍後再試。",
                 )
             try:
                 payload = await response.json()
@@ -306,27 +408,41 @@ class FeishuSubmitter:
                 raise ApiError(
                     "submit_failed",
                     502,
-                    "飛書未回傳可驗證的送出結果。",
+                    "無法確認飛書送出結果，請稍後再試。",
                 ) from exc
             if not is_successful_submit_response(payload):
                 raise ApiError(
                     "submit_failed",
                     502,
-                    "飛書未確認申請送出，請稍後再試。",
+                    "飛書未確認送出，請稍後再試。",
                 )
         except PlaywrightTimeoutError as exc:
             raise ApiError(
                 "submit_timeout",
                 504,
-                "等待飛書確認送出逾時，請稍後再試。",
+                "等待飛書確認逾時，請稍後再試。",
             ) from exc
 
+    async def _resolve_submit_button(self, page: Page) -> Locator:
+        submit_button = page.get_by_role(
+            "button",
+            name=re.compile(r"^(送出|提交|submit)$", re.IGNORECASE),
+        )
+        if await submit_button.count() != 1:
+            raise self._layout_changed("submit_button_guard")
+        try:
+            await submit_button.wait_for(state="visible")
+        except PlaywrightTimeoutError as exc:
+            raise self._layout_changed("submit_button_visibility_guard") from exc
+        return submit_button
+
     @staticmethod
-    def _layout_changed() -> ApiError:
+    def _layout_changed(reason: str) -> ApiError:
+        LOGGER.warning("feishu_layout_guard reason=%s", reason)
         return ApiError(
             "form_layout_changed",
             502,
-            "飛書表單欄位已變更，為避免錯誤送出，本次申請已停止。",
+            "飛書表單已變更，為避免誤送，本次申請已停止。",
         )
 
 
