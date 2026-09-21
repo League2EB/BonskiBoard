@@ -22,6 +22,17 @@ class FakePage:
         self.timeout = timeout
 
 
+class FakeNavigatingPage(FakePage):
+    def __init__(
+        self,
+        *,
+        goto_side_effect: Optional[object] = None,
+    ) -> None:
+        self.goto = AsyncMock(side_effect=goto_side_effect)
+        self.set_viewport_size = AsyncMock()
+        self.close = AsyncMock()
+
+
 class FakeContext:
     def __init__(self, events: list[str], page: FakePage) -> None:
         self.events = events
@@ -35,10 +46,25 @@ class FakeContext:
         return self.page
 
 
+class FakePageSequenceContext(FakeContext):
+    def __init__(self, events: list[str], pages: list[FakeNavigatingPage]) -> None:
+        super().__init__(events, pages[0])
+        self.pages = pages
+        self.new_page = AsyncMock(side_effect=pages)
+
+
 class FakeBrowser:
-    def __init__(self, events: list[str], context: FakeContext) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        context: FakeContext,
+        *,
+        version: object = "unknown",
+    ) -> None:
         self.events = events
         self.context = context
+        self.version = version
+        self.context_options: dict[str, object] | None = None
         self.close = AsyncMock(side_effect=self._close)
 
     async def _close(self) -> None:
@@ -46,6 +72,7 @@ class FakeBrowser:
 
     async def new_context(self, **kwargs: object) -> FakeContext:
         self.events.append("new_context")
+        self.context_options = kwargs
         return self.context
 
 
@@ -104,6 +131,11 @@ def test_dry_run_closes_browser_before_playwright_exit(
     assert result.status == "dry_run_complete"
     browser.close.assert_awaited_once()
     context.close.assert_not_awaited()
+    assert browser.context_options == {
+        "accept_downloads": False,
+        "viewport": feishu.FORM_VIEWPORTS[0],
+        "locale": "zh-TW",
+    }
     assert events.index("browser_close") < events.index("playwright_exit")
 
 
@@ -148,6 +180,232 @@ def test_form_api_error_survives_browser_cleanup(
     assert events.index("browser_close") < events.index("playwright_exit")
 
 
+def test_form_load_retries_before_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    page = SimpleNamespace(goto=AsyncMock(), set_viewport_size=AsyncMock())
+    expected_controls = SimpleNamespace()
+    submitter._wait_for_current_form_ready = AsyncMock(
+        side_effect=[
+            feishu._FormLoadIncomplete("form_ready_timeout", 0),
+            None,
+        ]
+    )
+    submitter._preflight_form = AsyncMock(return_value=expected_controls)
+
+    result = run_coroutine(submitter._load_and_preflight_form(page))
+
+    assert result is expected_controls
+    assert page.goto.await_count == 2
+    assert page.set_viewport_size.await_args_list == [
+        ((feishu.FORM_VIEWPORTS[0],), {}),
+        ((feishu.FORM_VIEWPORTS[1],), {}),
+    ]
+    assert page.goto.await_args_list == [
+        (
+            (submitter.settings.feishu_form_url,),
+            {
+                "wait_until": "commit",
+                "timeout": submitter._navigation_timeout_ms(),
+            },
+        ),
+        (
+            (submitter.settings.feishu_form_url,),
+            {
+                "wait_until": "commit",
+                "timeout": submitter._navigation_timeout_ms(),
+            },
+        ),
+    ]
+    submitter._preflight_form.assert_awaited_once_with(
+        page,
+        attempt=2,
+        viewport=feishu.FORM_VIEWPORTS[1],
+    )
+    assert submitter._wait_for_current_form_ready.await_args_list == [
+        ((page,), {"attempt": 1}),
+        ((page,), {"attempt": 2}),
+    ]
+
+
+def test_form_load_retries_with_fresh_page_and_closes_failed_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    first_page = FakeNavigatingPage(
+        goto_side_effect=feishu.PlaywrightTimeoutError("navigation timed out")
+    )
+    second_page = FakeNavigatingPage()
+    context = FakePageSequenceContext([], [first_page, second_page])
+    expected_controls = SimpleNamespace()
+    submitter._wait_for_current_form_ready = AsyncMock()
+    submitter._preflight_form = AsyncMock(return_value=expected_controls)
+
+    page, controls = run_coroutine(
+        submitter._load_and_preflight_form(context=context)
+    )
+
+    assert page is second_page
+    assert controls is expected_controls
+    assert context.new_page.await_count == 2
+    first_page.close.assert_awaited_once()
+    second_page.close.assert_not_awaited()
+    first_page.goto.assert_awaited_once_with(
+        submitter.settings.feishu_form_url,
+        wait_until="commit",
+        timeout=submitter._navigation_timeout_ms(),
+    )
+    second_page.goto.assert_awaited_once_with(
+        submitter.settings.feishu_form_url,
+        wait_until="commit",
+        timeout=submitter._navigation_timeout_ms(),
+    )
+    submitter._preflight_form.assert_awaited_once_with(
+        second_page,
+        attempt=2,
+        viewport=feishu.FORM_VIEWPORTS[1],
+    )
+
+
+def test_navigation_failures_close_every_attempt_page_before_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    pages = [
+        FakeNavigatingPage(
+            goto_side_effect=feishu.PlaywrightTimeoutError("navigation timed out")
+        ),
+        FakeNavigatingPage(
+            goto_side_effect=feishu.PlaywrightTimeoutError("navigation timed out")
+        ),
+    ]
+    context = FakePageSequenceContext([], pages)
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(submitter._load_and_preflight_form(context=context))
+
+    assert raised.value.code == "form_unavailable"
+    assert raised.value.status_code == 503
+    assert context.new_page.await_count == feishu.FORM_LOAD_ATTEMPTS
+    for page in pages:
+        page.close.assert_awaited_once()
+
+
+def test_browser_version_mismatch_stops_before_form_context_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    context = FakeContext(events, FakePage())
+    browser = FakeBrowser(events, context, version="152.0.7977.82")
+    manager = FakePlaywrightManager(events, browser)
+    monkeypatch.setattr(feishu, "async_playwright", lambda: manager)
+    submitter = FeishuSubmitter(
+        SimpleNamespace(
+            chromium_executable_path="/usr/bin/chromium",
+            feishu_form_url="https://example.invalid/form",
+            playwright_timeout_ms=1_000,
+            request_timeout_seconds=100,
+            dry_run=True,
+        )
+    )
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter.submit(
+                name="Test",
+                board_number="123",
+                ski_type="single",
+                photos={},
+            )
+        )
+
+    assert raised.value.code == "form_unavailable"
+    assert raised.value.status_code == 503
+    assert "new_context" not in events
+    browser.close.assert_awaited_once()
+
+
+def test_browser_version_uses_playwright_pinned_chromium_major(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+
+    assert submitter._is_expected_chromium_version("148.0.7778.96")
+    assert submitter._is_expected_chromium_version("148.0.7778.0")
+    assert submitter._is_expected_chromium_version("148.0.7778.97")
+    assert not submitter._is_expected_chromium_version("149.0.7827.0")
+    assert not submitter._is_expected_chromium_version("152.0.7977.82")
+    assert not submitter._is_expected_chromium_version("Chromium")
+    assert submitter._is_expected_chromium_version("unknown")
+
+
+def test_load_stages_have_distinct_bounded_playwright_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    submitter.settings.playwright_timeout_ms = 80_000
+
+    assert submitter._navigation_timeout_ms() == feishu.FORM_NAVIGATION_TIMEOUT_MS
+    assert submitter._form_ready_timeout_ms(1) == 30_000
+    assert submitter._form_ready_timeout_ms(2) == 10_000
+
+
+def test_two_safe_load_attempts_leave_time_for_data_entry_and_submission() -> None:
+    request_budget_ms = 100_000
+    maximum_load_budget_ms = (
+        feishu.FORM_LOAD_ATTEMPTS * feishu.FORM_NAVIGATION_TIMEOUT_MS
+        + sum(feishu.FORM_READY_TIMEOUTS_MS)
+    )
+
+    assert maximum_load_budget_ms == 70_000
+    assert maximum_load_budget_ms < request_budget_ms
+
+
+def test_loaded_layout_error_does_not_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    page = SimpleNamespace(goto=AsyncMock(), set_viewport_size=AsyncMock())
+    layout_error = feishu.ApiError(
+        "form_layout_changed",
+        502,
+        "layout changed",
+    )
+    submitter._wait_for_current_form_ready = AsyncMock()
+    submitter._preflight_form = AsyncMock(side_effect=layout_error)
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(submitter._load_and_preflight_form(page))
+
+    assert raised.value is layout_error
+    assert page.goto.await_count == 1
+    page.set_viewport_size.assert_awaited_once_with(feishu.FORM_VIEWPORTS[0])
+
+
+def test_submit_error_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=False)
+    submitter._complete_form = AsyncMock(return_value=FakeControl())
+    submit_error = feishu.ApiError("submit_failed", 502, "submit failed")
+    submitter._submit = AsyncMock(side_effect=submit_error)
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter.submit(
+                name="Test",
+                board_number="123",
+                ski_type="single",
+                photos={},
+            )
+        )
+
+    assert raised.value is submit_error
+    submitter._complete_form.assert_awaited_once()
+    submitter._submit.assert_awaited_once()
+
+
 def test_only_explicit_feishu_success_code_is_accepted() -> None:
     assert is_successful_submit_response({"code": 0, "data": {"canSubmitAgain": True}})
     assert not is_successful_submit_response({"code": 1})
@@ -187,6 +445,19 @@ class FakeLocator:
 
     def locator(self, selector: str) -> "FakeLocator":
         return self.children[selector]
+
+
+class FakeChangingLocator(FakeLocator):
+    def __init__(self, snapshots: list[list[FakeControl]]) -> None:
+        super().__init__([])
+        self.snapshots = snapshots
+        self.count_calls = 0
+
+    async def count(self) -> int:
+        snapshot_index = min(self.count_calls, len(self.snapshots) - 1)
+        self.controls = self.snapshots[snapshot_index]
+        self.count_calls += 1
+        return len(self.controls)
 
 
 class FakeFieldPage:
@@ -232,9 +503,10 @@ class FakeReadyLocator:
     async def count(self) -> int:
         return 1
 
-    async def wait_for(self, *, state: str) -> None:
+    async def wait_for(self, *, state: str, timeout: int) -> None:
         assert state == "attached"
-        self.events.append(f"ready:{self.selector}")
+        assert timeout > 0
+        self.events.append(f"ready:{self.selector}:{timeout}")
         if self.should_timeout:
             raise feishu.PlaywrightTimeoutError("timed out")
 
@@ -252,6 +524,15 @@ class FakeReadyPage:
         }
         self.goto = AsyncMock()
         self.wait_for_load_state = AsyncMock()
+        self.set_viewport_size = AsyncMock()
+        self.evaluate = AsyncMock(
+            return_value={
+                "ready_state": "loading",
+                "body_text_length": 0,
+                "html_length": 8_076,
+                "resource_count": 12,
+            }
+        )
 
     def locator(self, selector: str) -> FakeReadyLocator:
         return self.locators[selector]
@@ -262,7 +543,7 @@ def test_contenteditable_control_is_resolved_inside_verified_field_container(
 ) -> None:
     submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
     contenteditable = FakeControl()
-    selector = "[contenteditable='true'], input:not([type='hidden']), textarea"
+    selector = feishu.TEXT_CONTROL_SELECTOR
     page = FakeFieldPage(FakeLocator(
         [FakeControl()],
         {selector: FakeLocator([contenteditable])},
@@ -273,12 +554,105 @@ def test_contenteditable_control_is_resolved_inside_verified_field_container(
             page,
             kind="name",
             selector=selector,
+            container_fallback_selector='[contenteditable="true"]',
             legacy_selector="input:not([type='hidden']), textarea",
             terms=("姓名",),
         )
     )
 
     assert result is contenteditable
+
+
+def test_text_control_falls_back_to_generic_contenteditable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "CONTROL_STABILITY_POLL_SECONDS", 0)
+    contenteditable = FakeControl()
+    page = FakeFieldPage(
+        FakeLocator(
+            [FakeControl()],
+            {
+                feishu.TEXT_CONTROL_SELECTOR: FakeLocator([]),
+                '[contenteditable="true"]': FakeLocator([contenteditable]),
+            },
+        )
+    )
+
+    result = run_coroutine(
+        submitter._resolve_control(
+            page,
+            kind="name",
+            selector=feishu.TEXT_CONTROL_SELECTOR,
+            container_fallback_selector='[contenteditable="true"]',
+            legacy_selector="input:not([type='hidden']), textarea",
+            terms=("姓名",),
+        )
+    )
+
+    assert result is contenteditable
+
+
+@pytest.mark.parametrize(
+    "snapshots",
+    (
+        [[FakeControl(), FakeControl()], [FakeControl()], [FakeControl()]],
+        [[], [FakeControl()], [FakeControl()]],
+    ),
+)
+def test_control_resolution_waits_for_a_stable_unique_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshots: list[list[FakeControl]],
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "CONTROL_STABILITY_POLL_SECONDS", 0)
+    controls = FakeChangingLocator(snapshots)
+
+    result = run_coroutine(
+        submitter._require_single_control(
+            controls,
+            kind="name",
+            require_visible=True,
+        )
+    )
+
+    assert result is snapshots[-1][0]
+    assert controls.count_calls == 3
+
+
+def test_control_resolution_keeps_fail_closed_with_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "CONTROL_STABILITY_TIMEOUT_SECONDS", 0)
+    controls = FakeChangingLocator([[FakeControl(), FakeControl()]])
+    token = feishu._PREFLIGHT_DIAGNOSTICS.set(
+        feishu._PreflightDiagnostics(
+            attempt=2,
+            viewport_width=325,
+            viewport_height=793,
+        )
+    )
+
+    try:
+        with caplog.at_level("WARNING", logger="bonskiboard.feishu"):
+            with pytest.raises(feishu.ApiError) as raised:
+                run_coroutine(
+                    submitter._require_single_control(
+                        controls,
+                        kind="name",
+                        require_visible=True,
+                    )
+                )
+    finally:
+        feishu._PREFLIGHT_DIAGNOSTICS.reset(token)
+
+    assert raised.value.code == "form_layout_changed"
+    assert (
+        "reason=control_guard kind=name candidate_count=2 visible_count=2 "
+        "attempt=2 viewport=325x793"
+    ) in caplog.text
 
 
 def test_ski_type_mapping_clicks_only_the_expected_unique_visible_option(
@@ -327,11 +701,15 @@ def test_current_form_readiness_waits_for_all_containers_before_resolution(
     submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
     events: list[str] = []
     page = FakeReadyPage(events)
+    name_control = FakeControl()
+    board_number_control = FakeControl()
+    board_photo_control = FakeControl()
+    card_photo_control = FakeControl()
     controls = [
-        FakeControl(),
-        FakeControl(),
-        FakeControl(file_count=1),
-        FakeControl(file_count=2),
+        name_control,
+        board_number_control,
+        board_photo_control,
+        card_photo_control,
     ]
 
     async def resolve_control(*_args: object, **_kwargs: object) -> FakeControl:
@@ -339,9 +717,22 @@ def test_current_form_readiness_waits_for_all_containers_before_resolution(
         return controls.pop(0)
 
     submitter._resolve_control = AsyncMock(side_effect=resolve_control)
-    submitter._select_ski_type = AsyncMock()
-    submitter._wait_for_uploads = AsyncMock()
-    submitter._resolve_submit_button = AsyncMock()
+    submitter._resolve_ski_type_control = AsyncMock(
+        side_effect=lambda *_args: (events.append("resolve_ski_type"), FakeControl())[1]
+    )
+    submitter._resolve_submit_button = AsyncMock(
+        side_effect=lambda *_args: (events.append("resolve_submit"), FakeControl())[1]
+    )
+    name_control.fill = AsyncMock(side_effect=lambda *_args: events.append("fill_name"))
+    board_number_control.fill = AsyncMock(
+        side_effect=lambda *_args: events.append("fill_board_number")
+    )
+    submitter._select_ski_type = AsyncMock(
+        side_effect=lambda *_args, **_kwargs: events.append("select_ski_type")
+    )
+    submitter._upload_and_confirm = AsyncMock(
+        side_effect=lambda _page, *, kind, **_kwargs: events.append(f"upload_{kind}")
+    )
     photos = {
         "board_photo": SimpleNamespace(path=Path("board.jpg")),
         "card_front_photo": SimpleNamespace(path=Path("front.jpg")),
@@ -359,75 +750,393 @@ def test_current_form_readiness_waits_for_all_containers_before_resolution(
     )
 
     assert {
-        event.removeprefix("ready:")
+        event.removeprefix("ready:").rsplit(":", 1)[0]
         for event in events
         if event.startswith("ready:")
     } == set(CURRENT_FORM_CONTAINER_SELECTORS)
     assert all(
-        events.index(f"ready:{selector}") < events.index("resolve_control")
+        events.index(
+            f"ready:{selector}:{submitter._form_ready_timeout_ms(1)}"
+        ) < events.index("resolve_control")
         for selector in CURRENT_FORM_CONTAINER_SELECTORS
+    )
+    preflight_complete = events.index("resolve_submit")
+    assert all(
+        preflight_complete < events.index(event)
+        for event in (
+            "fill_name",
+            "fill_board_number",
+            "select_ski_type",
+            "upload_board_photo",
+            "upload_card_photos",
+        )
     )
 
 
-def test_attachment_file_counts_require_exact_uploaded_files(
+class FakeUploadField:
+    def __init__(
+        self,
+        labels: Optional[dict[str, FakeLocator]] = None,
+        *,
+        count: int = 1,
+    ) -> None:
+        self.labels = labels or {}
+        self.field_count = count
+
+    async def count(self) -> int:
+        return self.field_count
+
+    def get_by_text(self, filename: str, *, exact: bool) -> FakeLocator:
+        assert exact
+        return self.labels.get(filename, FakeLocator([]))
+
+
+class FakeUploadPage:
+    def __init__(self, fields: dict[str, FakeUploadField]) -> None:
+        self.fields = fields
+
+    def locator(self, selector: str) -> FakeUploadField:
+        return self.fields[selector]
+
+
+def make_upload_page(
+    *,
+    board_labels: Optional[dict[str, FakeLocator]] = None,
+    card_labels: Optional[dict[str, FakeLocator]] = None,
+    board_field_count: int = 1,
+    card_field_count: int = 1,
+) -> FakeUploadPage:
+    return FakeUploadPage(
+        {
+            f"#field-item-{FIELD_IDS['board_photo']}": FakeUploadField(
+                board_labels,
+                count=board_field_count,
+            ),
+            f"#field-item-{FIELD_IDS['card_photos']}": FakeUploadField(
+                card_labels,
+                count=card_field_count,
+            ),
+        }
+    )
+
+
+def test_attachment_confirmation_accepts_replaced_file_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
-    board_photo = FakeControl(file_count=1)
-    card_photos = FakeControl(file_count=2)
-
-    run_coroutine(
-        submitter._require_attachment_file_count(board_photo, expected_count=1)
-    )
-    run_coroutine(
-        submitter._require_attachment_file_count(card_photos, expected_count=2)
+    control = FakeControl(file_count=0)
+    page = make_upload_page(
+        board_labels={"board_photo.jpg": FakeLocator([FakeControl()])}
     )
 
-    board_photo.evaluate.assert_awaited_once()
-    card_photos.evaluate.assert_awaited_once()
-    assert "HTMLInputElement" in board_photo.evaluate.await_args.args[0]
+    run_coroutine(
+        submitter._upload_and_confirm(
+            page,
+            control=control,
+            kind="board_photo",
+            files="/tmp/board_photo.jpg",
+            filenames=("board_photo.jpg",),
+        )
+    )
+
+    control.set_input_files.assert_awaited_once_with("/tmp/board_photo.jpg")
+    control.evaluate.assert_not_awaited()
 
 
-@pytest.mark.parametrize("file_count", (0, 3, None))
-def test_attachment_file_count_mismatch_fails_closed(
-    monkeypatch: pytest.MonkeyPatch, file_count: Optional[int]
+def test_attachment_input_error_is_classified_as_upload_failure(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    control = FakeControl()
+    control.set_input_files = AsyncMock(
+        side_effect=feishu.PlaywrightError("input replaced")
+    )
+    page = make_upload_page()
 
     with pytest.raises(feishu.ApiError) as raised:
         run_coroutine(
-            submitter._require_attachment_file_count(
-                FakeControl(file_count=file_count),
-                expected_count=1,
+            submitter._upload_and_confirm(
+                page,
+                control=control,
+                kind="board_photo",
+                files="/tmp/board_photo.jpg",
+                filenames=("board_photo.jpg",),
             )
         )
 
-    assert raised.value.code == "form_layout_changed"
+    assert raised.value.code == "upload_failed"
 
 
-def test_current_form_readiness_timeout_fails_closed_before_resolution(
+def test_attachment_confirmation_requires_filenames_in_their_own_field(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "UPLOAD_CONFIRM_TIMEOUT_SECONDS", 0)
+    page = make_upload_page(
+        card_labels={"board_photo.jpg": FakeLocator([FakeControl()])}
+    )
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter._wait_for_uploaded_files(
+                page,
+                kind="board_photo",
+                filenames=("board_photo.jpg",),
+            )
+        )
+
+    assert raised.value.code == "upload_failed"
+
+
+@pytest.mark.parametrize(
+    ("kind", "filenames", "field_count"),
+    (
+        ("board_photo", ("board_photo.jpg",), 0),
+        ("board_photo", ("board_photo.jpg",), 2),
+        (
+            "card_photos",
+            ("card_front_photo.jpg", "card_back_photo.jpg"),
+            0,
+        ),
+        (
+            "card_photos",
+            ("card_front_photo.jpg", "card_back_photo.jpg"),
+            2,
+        ),
+    ),
+)
+def test_attachment_confirmation_rejects_lost_or_duplicated_field(
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    filenames: tuple[str, ...],
+    field_count: int,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "UPLOAD_CONFIRM_TIMEOUT_SECONDS", 0)
+    page = make_upload_page(
+        **{
+            (
+                "board_field_count"
+                if kind == "board_photo"
+                else "card_field_count"
+            ): field_count
+        }
+    )
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter._wait_for_uploaded_files(
+                page,
+                kind=kind,
+                filenames=filenames,
+            )
+        )
+
+    assert raised.value.code == "upload_failed"
+
+
+@pytest.mark.parametrize(
+    "labels",
+    (
+        {},
+        {"board_photo.jpg": FakeLocator([FakeControl(visible=False)])},
+        {"board_photo.jpg": FakeLocator([FakeControl(), FakeControl()])},
+    ),
+)
+def test_attachment_confirmation_rejects_missing_invisible_or_duplicate_filename(
+    monkeypatch: pytest.MonkeyPatch,
+    labels: dict[str, FakeLocator],
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "UPLOAD_CONFIRM_TIMEOUT_SECONDS", 0)
+    page = make_upload_page(board_labels=labels)
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter._wait_for_uploaded_files(
+                page,
+                kind="board_photo",
+                filenames=("board_photo.jpg",),
+            )
+        )
+
+    assert raised.value.code == "upload_failed"
+
+
+@pytest.mark.parametrize(
+    "labels",
+    (
+        {"card_back_photo.jpg": FakeLocator([FakeControl()])},
+        {"card_front_photo.jpg": FakeLocator([FakeControl()])},
+        {
+            "card_front_photo.jpg": FakeLocator([FakeControl(visible=False)]),
+            "card_back_photo.jpg": FakeLocator([FakeControl()]),
+        },
+        {
+            "card_front_photo.jpg": FakeLocator([FakeControl()]),
+            "card_back_photo.jpg": FakeLocator([FakeControl(), FakeControl()]),
+        },
+    ),
+)
+def test_attachment_confirmation_rejects_each_card_filename_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    labels: dict[str, FakeLocator],
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "UPLOAD_CONFIRM_TIMEOUT_SECONDS", 0)
+    page = make_upload_page(card_labels=labels)
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter._wait_for_uploaded_files(
+                page,
+                kind="card_photos",
+                filenames=("card_front_photo.jpg", "card_back_photo.jpg"),
+            )
+        )
+
+    assert raised.value.code == "upload_failed"
+
+
+def test_attachment_confirmation_requires_both_card_filenames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    page = make_upload_page(
+        card_labels={
+            "card_front_photo.jpg": FakeLocator([FakeControl()]),
+            "card_back_photo.jpg": FakeLocator([FakeControl()]),
+        }
+    )
+
+    run_coroutine(
+        submitter._wait_for_uploaded_files(
+            page,
+            kind="card_photos",
+            filenames=("card_front_photo.jpg", "card_back_photo.jpg"),
+        )
+    )
+
+
+def test_attachment_confirmation_logs_safe_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    monkeypatch.setattr(feishu, "UPLOAD_CONFIRM_TIMEOUT_SECONDS", 0)
+    page = make_upload_page(board_field_count=0)
+    token = feishu._PREFLIGHT_DIAGNOSTICS.set(
+        feishu._PreflightDiagnostics(
+            attempt=2,
+            viewport_width=325,
+            viewport_height=793,
+        )
+    )
+
+    try:
+        with caplog.at_level("WARNING", logger="bonskiboard.feishu"):
+            with pytest.raises(feishu.ApiError):
+                run_coroutine(
+                    submitter._wait_for_uploaded_files(
+                        page,
+                        kind="board_photo",
+                        filenames=("board_photo.jpg",),
+                    )
+                )
+    finally:
+        feishu._PREFLIGHT_DIAGNOSTICS.reset(token)
+
+    assert "feishu_upload phase=failed" in caplog.text
+    assert (
+        "kind=board_photo field_count=0 candidate_count=0 visible_count=0 "
+        "attempt=2 viewport=325x793"
+    ) in caplog.text
+    assert "board_photo.jpg" not in caplog.text
+
+
+def test_upload_failure_prevents_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=False)
+    upload_error = feishu.ApiError("upload_failed", 502, "upload failed")
+    controls = feishu._PreflightedControls(
+        name_input=FakeControl(),
+        board_number_input=FakeControl(),
+        ski_type_control=FakeControl(),
+        board_photo_input=FakeControl(),
+        card_photo_input=FakeControl(),
+        submit_button=FakeControl(),
+        attempt=2,
+        viewport_width=325,
+        viewport_height=793,
+    )
+    submitter._load_and_preflight_form = AsyncMock(return_value=controls)
+    submitter._select_ski_type = AsyncMock()
+    submitter._upload_and_confirm = AsyncMock(side_effect=upload_error)
+    submitter._submit = AsyncMock()
+    photos = {
+        "board_photo": SimpleNamespace(path=Path("board_photo.jpg")),
+        "card_front_photo": SimpleNamespace(path=Path("card_front_photo.jpg")),
+        "card_back_photo": SimpleNamespace(path=Path("card_back_photo.jpg")),
+    }
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter.submit(
+                name="Test",
+                board_number="123",
+                ski_type="single",
+                photos=photos,
+            )
+        )
+
+    assert raised.value is upload_error
+    submitter._upload_and_confirm.assert_awaited_once()
+    submitter._submit.assert_not_awaited()
+
+
+def test_current_form_readiness_timeout_retries_before_failing_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=True)
+    events: list[str] = []
     page = FakeReadyPage(
-        [],
+        events,
         timeout_selector=f"#field-item-{FIELD_IDS['board_number']}",
     )
     submitter._resolve_control = AsyncMock()
 
-    with pytest.raises(feishu.ApiError) as raised:
-        run_coroutine(
-            submitter._complete_form(
-                page=page,
-                name="Test",
-                board_number="123",
-                ski_type="single",
-                photos={},
+    with caplog.at_level("WARNING", logger="bonskiboard.feishu"):
+        with pytest.raises(feishu.ApiError) as raised:
+            run_coroutine(
+                submitter._complete_form(
+                    page=page,
+                    name="Test",
+                    board_number="123",
+                    ski_type="single",
+                    photos={},
+                )
             )
-        )
 
-    assert raised.value.code == "form_layout_changed"
+    assert raised.value.code == "form_unavailable"
+    assert raised.value.status_code == 503
+    assert page.goto.await_count == feishu.FORM_LOAD_ATTEMPTS
+    assert page.set_viewport_size.await_count == feishu.FORM_LOAD_ATTEMPTS
     submitter._resolve_control.assert_not_awaited()
+    timeout_selector = f"#field-item-{FIELD_IDS['board_number']}"
+    assert (
+        f"ready:{timeout_selector}:{submitter._form_ready_timeout_ms(1)}"
+        in events
+    )
+    assert (
+        f"ready:{timeout_selector}:{submitter._form_ready_timeout_ms(2)}"
+        in events
+    )
+    assert (
+        "ready_state=loading body_text_length=0 html_length=8076 "
+        "resource_count=12"
+    ) in caplog.text
 
 
 @pytest.mark.parametrize("count", (0, 2))

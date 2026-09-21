@@ -3,6 +3,8 @@ FROM ${PYTHON_BASE_IMAGE}
 
 ARG DEBIAN_MIRROR=
 ARG PIP_INDEX_URL=
+ARG PLAYWRIGHT_DOWNLOAD_HOST=
+ARG PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=
 
 WORKDIR /app
 
@@ -13,7 +15,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/tmp/.cache \
     XDG_CONFIG_HOME=/tmp/.config \
     XDG_RUNTIME_DIR=/tmp/runtime \
-    CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-headless-shell
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         mirror="${DEBIAN_MIRROR%/}"; \
@@ -32,7 +34,6 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        chromium-headless-shell \
         fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
 
@@ -44,6 +45,14 @@ RUN if [ -n "$PIP_INDEX_URL" ]; then \
     fi
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin bonski
+RUN if [ -n "$PLAYWRIGHT_DOWNLOAD_HOST" ]; then \
+        export PLAYWRIGHT_DOWNLOAD_HOST; \
+    fi; \
+    if [ -n "$PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT" ]; then \
+        export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT; \
+    fi; \
+    python -m playwright install --with-deps chromium \
+    && chown -R bonski:bonski "$PLAYWRIGHT_BROWSERS_PATH"
 
 COPY --chown=bonski:bonski app ./app
 COPY --chown=bonski:bonski pokemon-theme.css ./pokemon-theme.css

@@ -158,17 +158,16 @@ def create_app(
                 }
 
                 try:
-                    async with app.state.submission_semaphore:
-                        result = await asyncio.wait_for(
-                            app.state.submitter.submit(
-                                name=name,
-                                board_number=board_number,
-                                ski_type=ski_type,
-                                photos=photos,
-                            ),
-                            timeout=app.state.settings.request_timeout_seconds,
-                        )
-                except TimeoutError as exc:
+                    result = await _submit_within_deadline(
+                        semaphore=app.state.submission_semaphore,
+                        submitter=app.state.submitter,
+                        name=name,
+                        board_number=board_number,
+                        ski_type=ski_type,
+                        photos=photos,
+                        timeout_seconds=app.state.settings.request_timeout_seconds,
+                    )
+                except asyncio.TimeoutError as exc:
                     raise ApiError(
                         "submit_timeout",
                         504,
@@ -203,6 +202,47 @@ def create_app(
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
+
+
+async def _submit_within_deadline(
+    *,
+    semaphore: asyncio.Semaphore,
+    submitter: Submitter,
+    name: str,
+    board_number: str,
+    ski_type: str,
+    photos: dict[str, SanitizedPhoto],
+    timeout_seconds: float,
+) -> SubmissionResult:
+    """Use one deadline for both queueing and the Feishu browser session."""
+
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    acquired = False
+    try:
+        await asyncio.wait_for(
+            semaphore.acquire(),
+            timeout=_remaining_submission_budget(deadline),
+        )
+        acquired = True
+        return await asyncio.wait_for(
+            submitter.submit(
+                name=name,
+                board_number=board_number,
+                ski_type=ski_type,
+                photos=photos,
+            ),
+            timeout=_remaining_submission_budget(deadline),
+        )
+    finally:
+        if acquired:
+            semaphore.release()
+
+
+def _remaining_submission_budget(deadline: float) -> float:
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        raise asyncio.TimeoutError
+    return remaining
 
 
 async def _parse_submission_form(

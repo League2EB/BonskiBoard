@@ -33,7 +33,10 @@
 [填寫雪板領取申請表](https://sunac.feishu.cn/share/base/form/shrcndRhW3v7obxceOEymUijK1b)
 
 但，廣州融創熱雪奇蹟提供的飛書表單沒有自動儲存功能
-以至於每天都要輸入一次資料＋上傳照片，五告麻煩。
+所以每天都要輸入一次資料＋上傳照片，五告麻煩。
+
+然後「查看提交紀錄」要登入
+登入後還顯示你要加入組織三小的e04su3....
 
 
 <a id="features"></a>
@@ -54,6 +57,9 @@
 - localStorage 與 IndexedDB
 - Pillow 圖片處理
 - Docker Compose
+
+容器不使用 Debian 發行版的 Chromium。映像會安裝 `requirements.txt` 所鎖定 Playwright
+版本所管理、相容的 Chromium，並以非 root 的 `bonski` 使用者執行。
 
 <a id="quick-start"></a>
 
@@ -80,6 +86,19 @@ docker compose down
 docker compose up -d --build
 ```
 
+若預設 Playwright 下載端點無法連線，可在受信任的網路環境中設定下列 Docker build
+參數的對應環境變數；它們不會在程式中預設任何第三方瀏覽器鏡像：
+
+```sh
+BONSKI_PLAYWRIGHT_DOWNLOAD_HOST=https://trusted.example/playwright \
+BONSKI_PLAYWRIGHT_DOWNLOAD_TIMEOUT=120000 \
+docker compose up -d --build
+```
+
+`BONSKI_PLAYWRIGHT_DOWNLOAD_HOST` 必須由部署者驗證為受信任的 Playwright 瀏覽器下載
+來源。`BONSKI_PLAYWRIGHT_DOWNLOAD_TIMEOUT` 預設為 `120000` 毫秒，並會傳給 Playwright
+下載程序。
+
 ## 開發與驗證
 
 ```sh
@@ -87,6 +106,39 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest
 ```
+
+## 飛書表單故障判讀
+
+送出前，BonskiBoard 會先以匿名瀏覽器載入飛書表單並檢查五個固定欄位與送出按鈕。
+這個階段不會填寫資料、上傳照片或提交申請。第一次以桌面尺寸載入失敗時，系統只會在
+仍未接觸任何資料的前提下，以 `325×793` 行動版尺寸重試一次。飛書的同步 CDN
+bootstrap 在較慢網路可能超過 20 秒，因此第一次會等待較完整的載入預算，第二次則利用
+已暖快取做較短的安全重試。
+
+- `form_unavailable`（HTTP 503）：飛書頁面或 CDN 在兩次安全載入嘗試後仍未完整載入。
+  請稍後再試；這不表示表單版型已變更。
+- `form_layout_changed`（HTTP 502）：頁面已載入，但固定欄位、控制項或選項與已驗證結構不符。
+  系統會停止，避免將資料填入錯誤欄位。
+- `upload_failed`、`submit_timeout`、`submit_failed`：已進入上傳或送出階段的失敗。
+  系統不會自動重試，以免重複送出。
+
+附件上傳不依賴飛書暫時的 `<input type="file">` 狀態，因為飛書可能在上傳後重新建立該元件。
+系統只會在各自的固定附件欄位中，確認伺服器產生的預期檔名各自唯一且可見後才允許送出。
+
+查詢容器日誌時，請依 request ID 及下列不含個資的欄位判讀：
+
+```sh
+docker compose logs --no-color --timestamps bonskiboard \
+  | grep -E -C 5 'submission .*phase=failed|feishu_browser|feishu_form_load|feishu_form_preflight|feishu_upload'
+```
+
+`feishu_browser` 會記錄 Playwright、Chromium 完整版本與 browser source；若 Chromium
+主版本不相容，會以 `browser_version_mismatch` 在接觸任何表單資料前停止。
+`feishu_form_load` 會記錄嘗試次數、`navigation_timeout` 或 `field_timeout` 等診斷、
+viewport、耗時、已找到欄位數量、document ready state、頁面文字／HTML 長度與資源數；
+`feishu_form_preflight` 會記錄失敗欄位、候選與可見控制項數量、viewport，以及 Playwright
+和 Chromium 版本；`feishu_upload` 會記錄固定附件欄位與確認數量。日誌不會記錄姓名、
+寄存編號、照片檔名或表單內容。
 
 <a id="security"></a>
 

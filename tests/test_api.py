@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
+from app.main import _submit_within_deadline
 from app.security import ApiError
 
 from .helpers import (
@@ -72,6 +75,54 @@ def test_submission_failure_still_cleans_temporary_files(settings) -> None:
     assert response.status_code == 502
     assert response.json()["code"] == "submit_failed"
     assert list(Path(settings.temp_root).iterdir()) == []
+
+
+def test_form_unavailable_returns_retryable_status(settings) -> None:
+    class UnavailableSubmitter:
+        async def submit(self, **_kwargs):
+            raise ApiError(
+                "form_unavailable",
+                503,
+                "飛書表單暫時無法載入，請稍後再試。",
+            )
+
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+
+    with TestClient(
+        create_app(settings=settings, submitter=UnavailableSubmitter())
+    ) as client:
+        response = submit(client)
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "ok": False,
+        "code": "form_unavailable",
+        "message": "飛書表單暫時無法載入，請稍後再試。",
+    }
+
+
+def test_submission_deadline_includes_waiting_for_concurrency_slot() -> None:
+    class UnexpectedSubmitter:
+        async def submit(self, **_kwargs):
+            raise AssertionError("submitter must not run after queue timeout")
+
+    async def exercise() -> None:
+        semaphore = asyncio.Semaphore(1)
+        await semaphore.acquire()
+        with pytest.raises(asyncio.TimeoutError):
+            await _submit_within_deadline(
+                semaphore=semaphore,
+                submitter=UnexpectedSubmitter(),
+                name="Test",
+                board_number="123",
+                ski_type="single",
+                photos={},
+                timeout_seconds=0.001,
+            )
+        semaphore.release()
+
+    asyncio.get_event_loop().run_until_complete(exercise())
 
 
 def test_submission_requires_same_origin_header(client) -> None:
