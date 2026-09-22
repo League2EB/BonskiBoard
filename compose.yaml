@@ -11,7 +11,7 @@ services:
         PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "${BONSKI_PLAYWRIGHT_DOWNLOAD_TIMEOUT:-120000}"
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8911:8080"
     environment:
       DRY_RUN: "${DRY_RUN:-true}"
     shm_size: 1gb

@@ -31,7 +31,7 @@ def test_default_compose_starts_local_development_without_vpn() -> None:
 
     assert "  vpn:" not in compose
     assert "network_mode: service:vpn" not in compose
-    assert '      - "127.0.0.1:8080:8080"' in compose
+    assert '      - "127.0.0.1:8911:8080"' in compose
     assert 'DRY_RUN: "${DRY_RUN:-true}"' in compose
 
 
@@ -44,7 +44,7 @@ def test_compose_routes_bonskiboard_only_through_vpn() -> None:
     assert "      - NET_ADMIN" in compose
     assert "      - CHOWN" in compose
     assert "      - DAC_OVERRIDE" in compose
-    assert '      - "127.0.0.1:8080:8080"' in compose
+    assert '      - "127.0.0.1:8911:8080"' in compose
     assert "source: ./hk-3-IrisBh.conf" in compose
     assert "target: /gluetun/wireguard/wg0.conf" in compose
     assert "read_only: true" in compose
