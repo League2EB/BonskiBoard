@@ -28,6 +28,7 @@ class FakeSubmitter:
         board_number: str,
         ski_type: str,
         photos: dict,
+        request_id: str | None = None,
     ) -> SubmissionResult:
         self.calls.append(
             {

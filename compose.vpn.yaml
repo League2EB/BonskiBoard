@@ -1,0 +1,79 @@
+services:
+  vpn:
+    image: ghcr.io/qdm12/gluetun:v3.41.3
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - CHOWN
+      - DAC_OVERRIDE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      VPN_SERVICE_PROVIDER: custom
+      VPN_TYPE: wireguard
+      FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT: "on"
+      FIREWALL_INPUT_PORTS: "8080"
+      DNS_SERVER: "on"
+      DNS_UPSTREAM_RESOLVER_TYPE: dot
+      DNS_UPSTREAM_RESOLVERS: cloudflare
+      LOG_LEVEL: error
+      HEALTH_RESTART_VPN: "on"
+      HEALTH_SMALL_CHECK_TYPE: dns
+      HTTP_CONTROL_SERVER_ADDRESS: "127.0.0.1:8000"
+      HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH: /gluetun/auth/config.toml
+      PUBLICIP_FILE: /tmp/gluetun-public-ip
+      WIREGUARD_IMPLEMENTATION: userspace
+    volumes:
+      - type: bind
+        source: ./hk-3-IrisBh.conf
+        target: /gluetun/wireguard/wg0.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./gluetun-auth.toml
+        target: /gluetun/auth/config.toml
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      vpn:
+  bonskiboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: "${BONSKI_PYTHON_BASE_IMAGE:-python:3.12-slim-bookworm}"
+        DEBIAN_MIRROR: "${BONSKI_DEBIAN_MIRROR:-}"
+        PIP_INDEX_URL: "${BONSKI_PIP_INDEX_URL:-}"
+        PLAYWRIGHT_DOWNLOAD_HOST: "${BONSKI_PLAYWRIGHT_DOWNLOAD_HOST:-}"
+        PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "${BONSKI_PLAYWRIGHT_DOWNLOAD_TIMEOUT:-120000}"
+    restart: unless-stopped
+    network_mode: service:vpn
+    depends_on:
+      vpn:
+        condition: service_healthy
+    environment:
+      DRY_RUN: "${DRY_RUN:-true}"
+    shm_size: 1gb
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,mode=1777,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  vpn:
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 192.168.250.0/24

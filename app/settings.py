@@ -29,6 +29,11 @@ def _env_int(name: str, default: int) -> int:
     return int(value) if value else default
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    return float(value) if value else default
+
+
 @dataclass(frozen=True)
 class Settings:
     """Configuration with intentionally bounded resource limits."""
@@ -45,6 +50,10 @@ class Settings:
     playwright_timeout_ms: int = 80_000
     max_concurrent_submissions: int = 2
     temp_root: Path = Path("/tmp")
+    vpn_health_url: str = "http://127.0.0.1:9999/"
+    vpn_status_url: str = "http://127.0.0.1:8000/v1/vpn/status"
+    vpn_public_ip_url: str = "http://127.0.0.1:8000/v1/publicip/ip"
+    vpn_timeout_seconds: float = 3.0
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -60,4 +69,5 @@ class Settings:
             playwright_timeout_ms=_env_int("PLAYWRIGHT_TIMEOUT_MS", 80_000),
             max_concurrent_submissions=_env_int("MAX_CONCURRENT_SUBMISSIONS", 2),
             temp_root=Path(os.getenv("TEMP_ROOT", "/tmp")),
+            vpn_timeout_seconds=_env_float("VPN_TIMEOUT_SECONDS", 3.0),
         )

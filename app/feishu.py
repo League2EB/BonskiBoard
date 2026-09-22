@@ -24,6 +24,7 @@ from playwright.async_api import (
 from .images import SanitizedPhoto
 from .security import ApiError
 from .settings import Settings
+from .vpn import verify_vpn_egress
 
 
 FIELD_IDS = {
@@ -171,6 +172,7 @@ class FeishuSubmitter:
         board_number: str,
         ski_type: str,
         photos: dict[str, SanitizedPhoto],
+        request_id: str | None = None,
     ) -> SubmissionResult:
         try:
             async with async_playwright() as playwright:
@@ -258,6 +260,17 @@ class FeishuSubmitter:
                             status="dry_run_complete",
                             message="檢查完成，未正式送出。",
                         )
+                    egress_ip = await verify_vpn_egress(self.settings)
+                    LOGGER.info(
+                        "submission request_id=%s phase=vpn_verified "
+                        "vpn_status=running egress_ip=%s",
+                        request_id or "unknown",
+                        egress_ip,
+                    )
+                    LOGGER.info(
+                        "submission request_id=%s phase=feishu_submit_started",
+                        request_id or "unknown",
+                    )
                     await self._submit(page, submit_button)
                     return SubmissionResult(status="submitted", message="申請已送出。")
                 finally:

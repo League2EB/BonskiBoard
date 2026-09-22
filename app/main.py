@@ -55,6 +55,7 @@ class Submitter(Protocol):
         board_number: str,
         ski_type: str,
         photos: dict[str, SanitizedPhoto],
+        request_id: str | None = None,
     ) -> SubmissionResult: ...
 
 
@@ -154,6 +155,7 @@ def create_app(
                         ski_type=ski_type,
                         photos=photos,
                         timeout_seconds=app.state.settings.request_timeout_seconds,
+                        request_id=request_id,
                     )
                 except asyncio.TimeoutError as exc:
                     raise ApiError(
@@ -201,6 +203,7 @@ async def _submit_within_deadline(
     ski_type: str,
     photos: dict[str, SanitizedPhoto],
     timeout_seconds: float,
+    request_id: str | None = None,
 ) -> SubmissionResult:
     """Use one deadline for both queueing and the Feishu browser session."""
 
@@ -218,6 +221,7 @@ async def _submit_within_deadline(
                 board_number=board_number,
                 ski_type=ski_type,
                 photos=photos,
+                request_id=request_id,
             ),
             timeout=_remaining_submission_budget(deadline),
         )

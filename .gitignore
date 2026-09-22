@@ -14,6 +14,7 @@
 !.env.*.example
 .envrc
 .direnv/
+hk-3-IrisBh.conf
 
 # Python bytecode and virtual environments
 __pycache__/

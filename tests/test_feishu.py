@@ -106,6 +106,10 @@ def make_submitter(
         feishu_form_url="https://example.invalid/form",
         playwright_timeout_ms=1_000,
         dry_run=dry_run,
+        vpn_health_url="http://127.0.0.1:9999/",
+        vpn_status_url="http://127.0.0.1:8000/v1/vpn/status",
+        vpn_public_ip_url="http://127.0.0.1:8000/v1/publicip/ip",
+        vpn_timeout_seconds=1.0,
     )
     return FeishuSubmitter(settings), browser, context, events
 
@@ -141,20 +145,75 @@ def test_dry_run_closes_browser_before_playwright_exit(
 
 def test_confirmed_submission_invokes_submit(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     submitter, browser, context, events = make_submitter(monkeypatch, dry_run=False)
     submitter._complete_form = AsyncMock()
-    submitter._submit = AsyncMock()
+    submission_events: list[str] = []
 
-    result = run_coroutine(
-        submitter.submit(name="Test", board_number="123", ski_type="double", photos={})
-    )
+    async def record_vpn_check(_settings: object) -> str:
+        submission_events.append("vpn_verified")
+        return "8.8.8.8"
+
+    async def record_submit(*_args: object) -> None:
+        submission_events.append("feishu_submit")
+
+    monkeypatch.setattr(feishu, "verify_vpn_egress", record_vpn_check)
+    submitter._submit = AsyncMock(side_effect=record_submit)
+
+    with caplog.at_level("INFO", logger="bonskiboard.feishu"):
+        result = run_coroutine(
+            submitter.submit(
+                name="Test",
+                board_number="123",
+                ski_type="double",
+                photos={},
+                request_id="request-123",
+            )
+        )
 
     assert result.status == "submitted"
+    assert submission_events == ["vpn_verified", "feishu_submit"]
+    assert (
+        "submission request_id=request-123 phase=vpn_verified "
+        "vpn_status=running egress_ip=8.8.8.8"
+    ) in caplog.text
+    assert (
+        "submission request_id=request-123 phase=feishu_submit_started"
+    ) in caplog.text
     submitter._submit.assert_awaited_once()
     browser.close.assert_awaited_once()
     context.close.assert_not_awaited()
     assert events.index("browser_close") < events.index("playwright_exit")
+
+
+def test_vpn_failure_prevents_feishu_submit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submitter, _, _, _ = make_submitter(monkeypatch, dry_run=False)
+    submitter._complete_form = AsyncMock()
+    submitter._submit = AsyncMock()
+    vpn_error = feishu.ApiError(
+        "vpn_unavailable",
+        503,
+        "VPN unavailable",
+    )
+    verify_vpn_egress = AsyncMock(side_effect=vpn_error)
+    monkeypatch.setattr(feishu, "verify_vpn_egress", verify_vpn_egress)
+
+    with pytest.raises(feishu.ApiError) as raised:
+        run_coroutine(
+            submitter.submit(
+                name="Test",
+                board_number="123",
+                ski_type="double",
+                photos={},
+            )
+        )
+
+    assert raised.value is vpn_error
+    verify_vpn_egress.assert_awaited_once_with(submitter.settings)
+    submitter._submit.assert_not_awaited()
 
 
 def test_form_api_error_survives_browser_cleanup(
@@ -390,6 +449,11 @@ def test_submit_error_is_not_retried(
     submitter._complete_form = AsyncMock(return_value=FakeControl())
     submit_error = feishu.ApiError("submit_failed", 502, "submit failed")
     submitter._submit = AsyncMock(side_effect=submit_error)
+    monkeypatch.setattr(
+        feishu,
+        "verify_vpn_egress",
+        AsyncMock(return_value="8.8.8.8"),
+    )
 
     with pytest.raises(feishu.ApiError) as raised:
         run_coroutine(
