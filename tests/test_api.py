@@ -256,7 +256,7 @@ def test_static_assets_are_available(client) -> None:
         in html.text
     )
     assert (
-        'property="og:image" content="/static/bonskiboard-share-card-final.png"'
+        'property="og:image" content="https://board.dadaderme.me/static/bonskiboard-share-card-df68329f.png"'
         in html.text
     )
     assert 'property="og:image:type" content="image/png"' in html.text
@@ -273,7 +273,7 @@ def test_static_assets_are_available(client) -> None:
         in html.text
     )
     assert (
-        'name="twitter:image" content="/static/bonskiboard-share-card-final.png"'
+        'name="twitter:image" content="https://board.dadaderme.me/static/bonskiboard-share-card-df68329f.png"'
         in html.text
     )
     assert (
@@ -289,7 +289,7 @@ def test_static_assets_are_available(client) -> None:
     assert icon.status_code == 200
     assert icon.headers["content-type"] == "image/png"
     assert icon.content == (Path(__file__).resolve().parents[1] / "icon.png").read_bytes()
-    share_card = client.get("/static/bonskiboard-share-card-final.png")
+    share_card = client.get("/static/bonskiboard-share-card-df68329f.png")
     assert share_card.status_code == 200
     assert share_card.headers["content-type"] == "image/png"
     assert share_card.content == (
