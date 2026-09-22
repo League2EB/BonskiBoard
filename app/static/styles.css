@@ -568,6 +568,19 @@ p {
   text-align: center;
 }
 
+.last-submission-time {
+  margin: 14px 1px 0;
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.65;
+}
+
+.quick-last-submission-time {
+  margin: 14px 0 0;
+  text-align: center;
+}
+
 .hero-visual {
   position: relative;
   width: min(100%, 405px);
@@ -1457,6 +1470,75 @@ p {
   gap: 9px;
 }
 
+.success-dialog {
+  width: min(calc(100% - 36px), 390px);
+  padding: 0;
+  color: var(--ink);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--primary) 15%, transparent), transparent 58%),
+    var(--surface);
+  border: 1px solid color-mix(in srgb, var(--primary) 42%, var(--line));
+  border-radius: 26px;
+  box-shadow: var(--shadow-float);
+  text-align: center;
+}
+
+.success-dialog::backdrop {
+  background: rgba(10, 30, 27, 0.45);
+  backdrop-filter: blur(3px);
+}
+
+.success-dialog form {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 31px 27px 27px;
+}
+
+.success-dialog-check {
+  display: grid;
+  width: 68px;
+  height: 68px;
+  margin-bottom: 19px;
+  place-items: center;
+  color: var(--primary-foreground);
+  background: var(--primary-deep);
+  border: 6px solid color-mix(in srgb, var(--primary) 22%, var(--surface));
+  border-radius: 50%;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--primary) 26%, transparent);
+  font-size: 37px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.success-dialog .dialog-kicker {
+  justify-content: center;
+  margin-bottom: 9px;
+  color: var(--primary-deep);
+}
+
+.success-dialog h2 {
+  margin-bottom: 8px;
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -0.055em;
+}
+
+.success-dialog-time {
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.success-dialog .dialog-actions {
+  width: 100%;
+  margin-top: 25px;
+}
+
+.success-dialog .button {
+  width: 100%;
+}
+
 @media (max-width: 850px) {
   .about-section {
     padding-top: 76px;
@@ -1727,6 +1809,10 @@ p {
     margin-top: 14px;
   }
 
+  .last-submission-time {
+    font-size: 9px;
+  }
+
   .hero h1 {
     font-size: clamp(3rem, 13vw, 4.6rem);
   }
@@ -1841,6 +1927,17 @@ p {
     right: 16px;
     bottom: calc(16px + env(safe-area-inset-bottom));
     width: calc(100% - 32px);
+  }
+
+  .success-dialog form {
+    padding: 27px 22px 22px;
+  }
+
+  .success-dialog-check {
+    width: 62px;
+    height: 62px;
+    margin-bottom: 16px;
+    font-size: 33px;
   }
 }
 

@@ -2,6 +2,7 @@ const DATABASE_NAME = "bonski-board";
 const DATABASE_VERSION = 1;
 const PHOTO_STORE = "photos";
 export const PROFILE_KEY = "bonski-board:v1:profile";
+export const LAST_CONFIRMED_SUBMISSION_TIME_KEY = "bonski-board:v1:last-confirmed-submission-time";
 
 export const PHOTO_ROLES = [
   "board_photo",
@@ -84,6 +85,44 @@ export function saveProfile({ name, boardNumber, skiType }) {
 
 export function removeProfile() {
   localStorage.removeItem(PROFILE_KEY);
+}
+
+function isValidIsoTimestamp(value) {
+  return typeof value === "string"
+    && /^\d{4}-\d{2}-\d{2}T/.test(value)
+    && !Number.isNaN(new Date(value).getTime());
+}
+
+export function loadLastConfirmedSubmissionTime() {
+  try {
+    const timestamp = localStorage.getItem(LAST_CONFIRMED_SUBMISSION_TIME_KEY);
+    if (!isValidIsoTimestamp(timestamp)) {
+      if (timestamp !== null) localStorage.removeItem(LAST_CONFIRMED_SUBMISSION_TIME_KEY);
+      return null;
+    }
+    return timestamp;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastConfirmedSubmissionTime(timestamp) {
+  if (!isValidIsoTimestamp(timestamp)) return false;
+  try {
+    localStorage.setItem(LAST_CONFIRMED_SUBMISSION_TIME_KEY, timestamp);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function removeLastConfirmedSubmissionTime() {
+  try {
+    localStorage.removeItem(LAST_CONFIRMED_SUBMISSION_TIME_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getPhoto(role) {

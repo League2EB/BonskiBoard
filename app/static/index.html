@@ -126,6 +126,7 @@
                 送出領板申請
               </button>
               <a class="quick-submit-edit" href="#profile-form">檢查或修改</a>
+              <p class="last-submission-time quick-last-submission-time" data-quick-last-submission hidden></p>
               <p class="quick-submit-disclosure">送出時才會暫時傳送資料</p>
             </div>
           </section>
@@ -343,6 +344,7 @@
               <p class="submit-disclosure">
                 送出時資料會暫時傳到伺服器，用於填寫飛書表單，完成後刪除
               </p>
+              <p class="last-submission-time" data-form-last-submission hidden></p>
               <button id="clear-button" class="clear-button" type="button">清除已儲存資料</button>
             </section>
           </form>
@@ -359,10 +361,22 @@
       <form method="dialog">
         <p class="dialog-kicker">無法復原</p>
         <h2 id="clear-dialog-title">清除已儲存資料？</h2>
-        <p>姓名、寄存編號、雪板類型與三張照片都會刪除</p>
+        <p>姓名、寄存編號、雪板類型、三張照片與此裝置最近一次送出時間都會刪除</p>
         <div class="dialog-actions">
           <button class="button button-secondary" value="cancel">保留資料</button>
           <button id="confirm-clear" class="button button-destructive" value="confirm">確認清除</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="success-dialog" class="success-dialog" aria-labelledby="success-dialog-title" aria-describedby="success-dialog-time">
+      <form method="dialog">
+        <div class="success-dialog-check" aria-hidden="true">✓</div>
+        <p class="dialog-kicker">提交完成</p>
+        <h2 id="success-dialog-title">領板申請已送出</h2>
+        <time id="success-dialog-time" class="success-dialog-time"></time>
+        <div class="dialog-actions">
+          <button class="button button-primary" value="confirm" autofocus>知道了</button>
         </div>
       </form>
     </dialog>

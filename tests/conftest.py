@@ -48,8 +48,6 @@ def settings(tmp_path: Path) -> Settings:
         temp_root=tmp_path,
         max_image_bytes=512 * 1024,
         max_request_bytes=2 * 1024 * 1024,
-        rate_limit_requests=5,
-        rate_limit_window_seconds=60,
         request_timeout_seconds=2,
     )
 

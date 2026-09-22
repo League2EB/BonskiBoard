@@ -14,8 +14,6 @@ services:
       - "8080:8080"
     environment:
       DRY_RUN: "${DRY_RUN:-true}"
-      RATE_LIMIT_REQUESTS: "${RATE_LIMIT_REQUESTS:-5}"
-      RATE_LIMIT_WINDOW_SECONDS: "${RATE_LIMIT_WINDOW_SECONDS:-600}"
     shm_size: 1gb
     read_only: true
     tmpfs:

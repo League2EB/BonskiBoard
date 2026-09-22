@@ -44,8 +44,6 @@ class Settings:
     request_timeout_seconds: int = 100
     playwright_timeout_ms: int = 80_000
     max_concurrent_submissions: int = 2
-    rate_limit_requests: int = 5
-    rate_limit_window_seconds: int = 10 * 60
     temp_root: Path = Path("/tmp")
 
     @classmethod
@@ -61,7 +59,5 @@ class Settings:
             request_timeout_seconds=_env_int("REQUEST_TIMEOUT_SECONDS", 100),
             playwright_timeout_ms=_env_int("PLAYWRIGHT_TIMEOUT_MS", 80_000),
             max_concurrent_submissions=_env_int("MAX_CONCURRENT_SUBMISSIONS", 2),
-            rate_limit_requests=_env_int("RATE_LIMIT_REQUESTS", 5),
-            rate_limit_window_seconds=_env_int("RATE_LIMIT_WINDOW_SECONDS", 10 * 60),
             temp_root=Path(os.getenv("TEMP_ROOT", "/tmp")),
         )

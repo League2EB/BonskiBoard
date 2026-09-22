@@ -233,23 +233,11 @@ def test_request_body_limit_is_enforced(settings, fake_submitter) -> None:
     assert response.json()["code"] == "image_too_large"
 
 
-def test_submission_rate_limit_is_enforced(settings, fake_submitter) -> None:
-    limited_settings = settings.__class__(
-        **{
-            **settings.__dict__,
-            "rate_limit_requests": 1,
-        }
-    )
-    from fastapi.testclient import TestClient
-    from app.main import create_app
+def test_submission_allows_repeated_requests(client, fake_submitter) -> None:
+    responses = [submit(client) for _ in range(6)]
 
-    with TestClient(create_app(limited_settings, fake_submitter)) as client:
-        first = submit(client)
-        second = submit(client)
-
-    assert first.status_code == 200
-    assert second.status_code == 429
-    assert second.json()["code"] == "rate_limited"
+    assert [response.status_code for response in responses] == [200] * 6
+    assert len(fake_submitter.calls) == 6
 
 
 def test_static_assets_are_available(client) -> None:
@@ -297,6 +285,7 @@ def test_static_assets_are_available(client) -> None:
     assert '<img src="/static/icon.png" alt="" />' in html.text
     storage = client.get("/static/storage.js")
     assert javascript.status_code == 200
+    assert storage.status_code == 200
     assert icon.status_code == 200
     assert icon.headers["content-type"] == "image/png"
     assert icon.content == (Path(__file__).resolve().parents[1] / "icon.png").read_bytes()
@@ -308,6 +297,10 @@ def test_static_assets_are_available(client) -> None:
     ).read_bytes()
     assert "localStorage" in storage.text
     assert "indexedDB" in storage.text
+    assert "LAST_CONFIRMED_SUBMISSION_TIME_KEY" in storage.text
+    assert "loadLastConfirmedSubmissionTime" in storage.text
+    assert "saveLastConfirmedSubmissionTime" in storage.text
+    assert "removeLastConfirmedSubmissionTime" in storage.text
     assert 'name="ski_type"' in html.text
     assert 'value="single"' in html.text
     assert 'value="double"' in html.text
@@ -319,6 +312,12 @@ def test_static_assets_are_available(client) -> None:
     assert 'id="quick-submit-button"' in html.text
     assert "quickSubmitButton.addEventListener" in javascript.text
     assert "renderQuickSubmit" in javascript.text
+    assert 'id="success-dialog"' in html.text
+    assert 'data-quick-last-submission' in html.text
+    assert 'data-form-last-submission' in html.text
+    assert "showSubmissionSuccess" in javascript.text
+    assert 'payload.status === "submitted"' in javascript.text
+    assert 'busy ? "處理中" : "送出領板申請"' in javascript.text
     assert "這幹嘛的？" in html.text
     assert "目前只支援廣州融創滑雪場寄存區" in html.text
     assert "非官方工具" in html.text
@@ -336,7 +335,7 @@ def test_static_assets_are_available(client) -> None:
     assert '"src": "/static/icon.png"' in manifest.text
     assert '"sizes": "1254x1254"' in manifest.text
     service_worker = client.get("/service-worker.js")
-    assert "bonski-board-v8" in service_worker.text
+    assert "bonski-board-v9" in service_worker.text
     assert '"/static/icon.png"' in service_worker.text
     assert theme.status_code == 200
     assert "--primary: #5acdbd" in theme.text

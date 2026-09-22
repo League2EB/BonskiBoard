@@ -1,11 +1,8 @@
-"""Request boundary checks and small in-memory abuse controls."""
+"""Request boundary checks and response security controls."""
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
-import asyncio
 from dataclasses import dataclass
-import time
 from typing import Awaitable, Callable
 from urllib.parse import urlsplit
 
@@ -27,28 +24,6 @@ def error_response(error: ApiError) -> JSONResponse:
         status_code=error.status_code,
         content={"ok": False, "code": error.code, "message": error.message},
     )
-
-
-class SlidingWindowRateLimiter:
-    """A bounded per-IP limiter suitable for a small trusted LAN service."""
-
-    def __init__(self, *, limit: int, window_seconds: int) -> None:
-        self._limit = limit
-        self._window_seconds = window_seconds
-        self._requests: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = asyncio.Lock()
-
-    async def allow(self, client_ip: str) -> bool:
-        now = time.monotonic()
-        cutoff = now - self._window_seconds
-        async with self._lock:
-            timestamps = self._requests[client_ip]
-            while timestamps and timestamps[0] <= cutoff:
-                timestamps.popleft()
-            if len(timestamps) >= self._limit:
-                return False
-            timestamps.append(now)
-            return True
 
 
 def require_same_origin_request(request: Request) -> None:
@@ -78,12 +53,6 @@ def require_same_origin_request(request: Request) -> None:
             403,
             "送出來源與目前網站不符。",
         )
-
-
-def client_ip(request: Request) -> str:
-    """Do not trust proxy headers in the local-network first release."""
-
-    return request.client.host if request.client else "unknown"
 
 
 class MaxRequestBodySizeMiddleware:

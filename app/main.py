@@ -23,8 +23,6 @@ from .security import (
     ApiError,
     MaxRequestBodySizeMiddleware,
     SecurityHeadersMiddleware,
-    SlidingWindowRateLimiter,
-    client_ip,
     error_response,
     require_same_origin_request,
 )
@@ -82,10 +80,6 @@ def create_app(
     )
     app.state.settings = runtime_settings
     app.state.submitter = submitter or FeishuSubmitter(runtime_settings)
-    app.state.rate_limiter = SlidingWindowRateLimiter(
-        limit=runtime_settings.rate_limit_requests,
-        window_seconds=runtime_settings.rate_limit_window_seconds,
-    )
     app.state.submission_semaphore = asyncio.Semaphore(
         runtime_settings.max_concurrent_submissions
     )
@@ -130,12 +124,6 @@ def create_app(
     @app.post("/api/submissions", include_in_schema=False)
     async def create_submission(request: Request) -> JSONResponse:
         require_same_origin_request(request)
-        if not await app.state.rate_limiter.allow(client_ip(request)):
-            raise ApiError(
-                "rate_limited",
-                429,
-                "送出次數太頻繁，請稍後再試。",
-            )
 
         name, board_number, ski_type, uploads = await _parse_submission_form(request)
         request_id = secrets.token_hex(8)

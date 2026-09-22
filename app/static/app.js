@@ -3,10 +3,13 @@ import {
   PHOTO_ROLES,
   clearPhotos,
   getPhoto,
+  loadLastConfirmedSubmissionTime,
   loadProfile,
   putPhoto,
+  removeLastConfirmedSubmissionTime,
   removePhoto,
   removeProfile,
+  saveLastConfirmedSubmissionTime,
   saveProfile,
 } from "./storage.js";
 
@@ -20,6 +23,8 @@ const quickSubmitButton = document.querySelector("#quick-submit-button");
 const clearButton = document.querySelector("#clear-button");
 const clearDialog = document.querySelector("#clear-dialog");
 const confirmClearButton = document.querySelector("#confirm-clear");
+const successDialog = document.querySelector("#success-dialog");
+const successDialogTime = document.querySelector("#success-dialog-time");
 const saveStatus = document.querySelector("[data-save-status]");
 const resultAnnouncement = document.querySelector("#result-announcement");
 const resultText = resultAnnouncement.querySelector("p");
@@ -29,6 +34,8 @@ const quickSubmitName = document.querySelector("[data-quick-name]");
 const quickSubmitBoardNumber = document.querySelector("[data-quick-board-number]");
 const quickSubmitSkiType = document.querySelector("[data-quick-ski-type]");
 const quickSubmitPhotoCount = document.querySelector("[data-quick-photo-count]");
+const quickLastSubmissionTime = document.querySelector("[data-quick-last-submission]");
+const formLastSubmissionTime = document.querySelector("[data-form-last-submission]");
 const submitButtons = [submitButton, quickSubmitButton];
 const SKI_TYPE_LABELS = {
   single: "單板",
@@ -42,6 +49,7 @@ const state = {
   dirty: false,
   hasSavedProfile: false,
   submitting: false,
+  lastConfirmedSubmissionTime: null,
 };
 
 const photoCards = Object.fromEntries(
@@ -59,6 +67,7 @@ initialize().catch((error) => {
 async function initialize() {
   applyColorPreference();
   listenForColorPreference();
+  state.lastConfirmedSubmissionTime = loadLastConfirmedSubmissionTime();
   await restoreSavedData();
   bindEvents();
   registerServiceWorker();
@@ -239,10 +248,15 @@ async function submitApplication() {
       throw new Error(payload?.message || "送出失敗，請稍後再試");
     }
 
-    showResult(
-      payload.status === "dry_run_complete" ? "info" : "success",
-      payload.message,
-    );
+    if (payload.status === "submitted") {
+      const timestamp = new Date().toISOString();
+      saveLastConfirmedSubmissionTime(timestamp);
+      state.lastConfirmedSubmissionTime = timestamp;
+      showResult("success", payload.message);
+      showSubmissionSuccess(formatSubmissionTime(timestamp));
+    } else {
+      showResult("info", payload.message);
+    }
   } catch (error) {
     showResult(
       "error",
@@ -264,7 +278,7 @@ function requestClear() {
     clearDialog.showModal();
     return;
   }
-  if (window.confirm("確認清除已儲存的姓名、寄存編號、雪板類型與三張照片？")) {
+  if (window.confirm("確認清除已儲存的姓名、寄存編號、雪板類型、三張照片與最近一次送出時間？")) {
     clearAllData();
   }
 }
@@ -272,6 +286,7 @@ function requestClear() {
 async function clearAllData() {
   try {
     removeProfile();
+    removeLastConfirmedSubmissionTime();
     await clearPhotos();
     nameInput.value = "";
     boardNumberInput.value = "";
@@ -288,6 +303,7 @@ async function clearAllData() {
     });
     state.dirty = false;
     state.hasSavedProfile = false;
+    state.lastConfirmedSubmissionTime = null;
     render();
     showResult("success", "已清除儲存資料");
   } catch (error) {
@@ -349,6 +365,7 @@ function render() {
     button.disabled = !canSubmit;
   });
   renderQuickSubmit(savedProfileReady);
+  renderLastConfirmedSubmissionTime();
 
   PHOTO_ROLES.forEach((role) => {
     const card = photoCards[role];
@@ -393,6 +410,28 @@ function renderQuickSubmit(savedProfileReady) {
   quickSubmitPhotoCount.textContent = `${PHOTO_ROLES.filter(
     (role) => state.photos[role] instanceof Blob,
   ).length} 張照片已準備`;
+}
+
+function renderLastConfirmedSubmissionTime() {
+  const timestamp = state.lastConfirmedSubmissionTime;
+  const text = timestamp ? `此裝置最近一次送出：${formatSubmissionTime(timestamp)}` : "";
+  quickLastSubmissionTime.textContent = text;
+  quickLastSubmissionTime.hidden = !text;
+  formLastSubmissionTime.textContent = text;
+  formLastSubmissionTime.hidden = !text;
+}
+
+function formatSubmissionTime(timestamp) {
+  const date = new Date(timestamp);
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${hour}:${minute}`;
+}
+
+function showSubmissionSuccess(timestamp) {
+  successDialogTime.textContent = timestamp;
+  successDialogTime.dateTime = state.lastConfirmedSubmissionTime || "";
+  if (typeof successDialog.showModal === "function") successDialog.showModal();
 }
 
 function setSaveStatus(tone, title, copy) {
