@@ -247,6 +247,7 @@ def test_static_assets_are_available(client) -> None:
     icon = client.get("/static/icon.png")
 
     assert html.status_code == 200
+    assert html.headers["cache-control"] == "no-cache"
     assert "BonskiBoard" in html.text
     assert 'property="og:type" content="website"' in html.text
     assert 'property="og:site_name" content="BonskiBoard"' in html.text
@@ -283,6 +284,10 @@ def test_static_assets_are_available(client) -> None:
     assert 'rel="icon" href="/static/icon.png" type="image/png"' in html.text
     assert 'rel="apple-touch-icon" href="/static/icon.png"' in html.text
     assert '<img src="/static/icon.png" alt="" />' in html.text
+    assert '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">' in html.text
+    assert 'href="/pokemon-theme.css?v=11"' in html.text
+    assert 'href="/static/styles.css?v=11"' in html.text
+    assert 'src="/static/app.js?v=11"' in html.text
     storage = client.get("/static/storage.js")
     assert javascript.status_code == 200
     assert storage.status_code == 200
@@ -343,7 +348,17 @@ def test_static_assets_are_available(client) -> None:
     assert '"src": "/static/icon.png"' in manifest.text
     assert '"sizes": "1254x1254"' in manifest.text
     service_worker = client.get("/service-worker.js")
-    assert "bonski-board-v10" in service_worker.text
+    assert service_worker.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+    assert "bonski-board-v11" in service_worker.text
+    assert '"/pokemon-theme.css?v=11"' in service_worker.text
+    assert '"/static/styles.css?v=11"' in service_worker.text
+    assert '"/static/app.js?v=11"' in service_worker.text
     assert '"/static/icon.png"' in service_worker.text
+    assert 'event.request.mode === "navigate"' in service_worker.text
+    assert 'fetch(event.request).catch(() => caches.match("/"))' in service_worker.text
+    assert "const APP_SHELL_URLS = new Set(" in service_worker.text
+    assert "APP_SHELL_URLS.has(url.href)" in service_worker.text
+    assert "caches.match(event.request)" not in service_worker.text
+    assert 'navigator.serviceWorker.register("/service-worker.js", { updateViaCache: "none" })' in javascript.text
     assert theme.status_code == 200
     assert "--primary: #5acdbd" in theme.text

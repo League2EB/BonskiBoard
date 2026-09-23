@@ -98,7 +98,11 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     async def homepage() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+        return FileResponse(
+            STATIC_DIR / "index.html",
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/pokemon-theme.css", include_in_schema=False)
     async def pokemon_theme() -> FileResponse:
@@ -116,6 +120,7 @@ def create_app(
         return FileResponse(
             STATIC_DIR / "service-worker.js",
             media_type="application/javascript",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 
     @app.get("/healthz", include_in_schema=False)
