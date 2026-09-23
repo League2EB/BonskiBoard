@@ -107,39 +107,6 @@ python3 -m venv .venv
 .venv/bin/pytest
 ```
 
-## 飛書表單故障判讀
-
-送出前，BonskiBoard 會先以匿名瀏覽器載入飛書表單並檢查五個固定欄位與送出按鈕。
-這個階段不會填寫資料、上傳照片或提交申請。第一次以桌面尺寸載入失敗時，系統只會在
-仍未接觸任何資料的前提下，以 `325×793` 行動版尺寸重試一次。飛書的同步 CDN
-bootstrap 在較慢網路可能超過 20 秒，因此第一次會等待較完整的載入預算，第二次則利用
-已暖快取做較短的安全重試。
-
-- `form_unavailable`（HTTP 503）：飛書頁面或 CDN 在兩次安全載入嘗試後仍未完整載入。
-  請稍後再試；這不表示表單版型已變更。
-- `form_layout_changed`（HTTP 502）：頁面已載入，但固定欄位、控制項或選項與已驗證結構不符。
-  系統會停止，避免將資料填入錯誤欄位。
-- `upload_failed`、`submit_timeout`、`submit_failed`：已進入上傳或送出階段的失敗。
-  系統不會自動重試，以免重複送出。
-
-附件上傳不依賴飛書暫時的 `<input type="file">` 狀態，因為飛書可能在上傳後重新建立該元件。
-系統只會在各自的固定附件欄位中，確認伺服器產生的預期檔名各自唯一且可見後才允許送出。
-
-查詢容器日誌時，請依 request ID 及下列不含個資的欄位判讀：
-
-```sh
-docker compose logs --no-color --timestamps bonskiboard \
-  | grep -E -C 5 'submission .*phase=failed|feishu_browser|feishu_form_load|feishu_form_preflight|feishu_upload'
-```
-
-`feishu_browser` 會記錄 Playwright、Chromium 完整版本與 browser source；若 Chromium
-主版本不相容，會以 `browser_version_mismatch` 在接觸任何表單資料前停止。
-`feishu_form_load` 會記錄嘗試次數、`navigation_timeout` 或 `field_timeout` 等診斷、
-viewport、耗時、已找到欄位數量、document ready state、頁面文字／HTML 長度與資源數；
-`feishu_form_preflight` 會記錄失敗欄位、候選與可見控制項數量、viewport，以及 Playwright
-和 Chromium 版本；`feishu_upload` 會記錄固定附件欄位與確認數量。日誌不會記錄姓名、
-寄存編號、照片檔名或表單內容。
-
 <a id="security"></a>
 
 ## 隱私與安全
