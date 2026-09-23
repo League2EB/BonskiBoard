@@ -329,13 +329,21 @@ def test_static_assets_are_available(client) -> None:
     assert "個人照片與有效期需清楚可見" in html.text
     assert "點選「再次填寫」" in html.text
     assert "重新輸入資料、重新選照片，很麻煩。" in html.text
+    assert 'href="https://github.com/League2EB/BonskiBoard"' in html.text
+    assert 'target="_blank"' in html.text
+    assert 'rel="noopener noreferrer"' in html.text
+    assert 'aria-label="前往 BonskiBoard 的 GitHub 開源程式碼"' in html.text
+    assert "怎麼證明沒偷存資料？" in html.text
+    assert "資料只存在你自己的瀏覽器中" in html.text
+    assert "程式碼已開源到 github ，可自行驗證" in html.text
+    assert "或建議部屬到私人伺服器。" in html.text
     manifest = client.get("/manifest.webmanifest")
     assert manifest.status_code == 200
     assert '"description": "廣州融創寄存區領板助手"' in manifest.text
     assert '"src": "/static/icon.png"' in manifest.text
     assert '"sizes": "1254x1254"' in manifest.text
     service_worker = client.get("/service-worker.js")
-    assert "bonski-board-v9" in service_worker.text
+    assert "bonski-board-v10" in service_worker.text
     assert '"/static/icon.png"' in service_worker.text
     assert theme.status_code == 200
     assert "--primary: #5acdbd" in theme.text
